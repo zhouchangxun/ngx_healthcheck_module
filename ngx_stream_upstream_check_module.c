@@ -2063,7 +2063,7 @@ ngx_stream_upstream_check_init_shm(ngx_conf_t *cf, void *conf)
     ngx_log_debug1(NGX_LOG_DEBUG_STREAM, cf->log, 0,
                        "stream upstream check, peers size:%ui", 
                        ucmcf->peers->peers.nelts); 
-    if (ucmcf->peers->peers.nelts > 0) {
+    if (1||(ucmcf->peers->peers.nelts > 0)) {
 
         ngx_stream_upstream_check_shm_generation++;
 

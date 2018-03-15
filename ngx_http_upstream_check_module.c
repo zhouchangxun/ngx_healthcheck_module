@@ -3728,7 +3728,8 @@ ngx_http_upstream_check_init_shm(ngx_conf_t *cf, void *conf)
     ngx_shm_zone_t                       *shm_zone;
     ngx_http_upstream_check_main_conf_t  *ucmcf = conf;
 
-    if (ucmcf->peers->peers.nelts > 0) {
+    //if (ucmcf->peers->peers.nelts > 0) {
+    if (1) {
 
         ngx_http_upstream_check_shm_generation++;
 
