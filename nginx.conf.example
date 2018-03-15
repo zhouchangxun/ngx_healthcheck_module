@@ -1,0 +1,60 @@
+#user  nobody;
+worker_processes  1;
+error_log  logs/error.log  info;
+#pid        logs/nginx.pid;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    server {
+        listen 80;
+
+        location /status/stream {
+            l4check_status;
+        }
+        location /status {
+            check_status;
+        }
+
+        location / { 
+          proxy_pass http://http-cluster;
+        }   
+    }
+
+    upstream http-cluster {
+        # simple round-robin
+        server 127.0.0.1:80;
+        server 127.0.0.2:81;
+
+        check interval=3000 rise=2 fall=5 timeout=5000 type=http;
+        check_http_send "GET / HTTP/1.0\r\n\r\n";
+        check_http_expect_alive http_2xx http_3xx;
+    }
+}
+
+stream {
+    upstream tcp-cluster {
+        # simple round-robin
+        server 127.0.0.1:22;
+        server 192.168.0.2:22;
+        check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=tcp;
+    }
+    upstream udp-cluster {
+        # simple round-robin
+        server 127.0.0.1:53;
+        server 8.8.8.8:53;
+        check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=udp;
+    }
+    server {
+        listen 522;
+        proxy_pass tcp-cluster;
+    }
+    server {
+        listen 53;
+        proxy_pass udp-cluster;
+    }
+    
+}
+
