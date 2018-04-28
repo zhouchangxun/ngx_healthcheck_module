@@ -22,55 +22,59 @@ and provide a http interface to get backend-server status"
 >make && make install
 
 # config examples
+https://github.com/zhouchangxun/ngx_healthcheck_module/blob/master/nginx.conf.example
 
+# demo output(use example conf above)
 ``` python
-stream {
-    upstream tcp-cluster {
-        # simple round-robin
-        server 192.168.0.1:22;
-        server 192.168.0.2:22;
-        check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=tcp;
+[root@test2 ngx_healthcheck_module.git]# 
+[root@test2 ngx_healthcheck_module.git]# curl localhost/status?format=json
+{"servers": {
+  "total": 2,
+  "generation": 1,
+  "server": [
+    {"index": 0, "upstream": "http-cluster", "name": "127.0.0.1:8080", "status": "up", "rise": 7, "fall": 0, "type": "http", "port": 0},
+    {"index": 1, "upstream": "http-cluster", "name": "127.0.0.2:81", "status": "down", "rise": 0, "fall": 7, "type": "http", "port": 0}
+  ]
+}}
+[root@test2 ngx_healthcheck_module.git]# curl localhost/status/stream?format=json
+{"servers": {
+  "total": 4,
+  "generation": 1,
+  "server": [
+    {"index": 0, "upstream": "tcp-cluster", "name": "127.0.0.1:22", "status": "up", "rise": 9, "fall": 0, "type": "tcp", "port": 0},
+    {"index": 1, "upstream": "tcp-cluster", "name": "192.168.0.2:22", "status": "down", "rise": 0, "fall": 6, "type": "tcp", "port": 0},
+    {"index": 2, "upstream": "udp-cluster", "name": "127.0.0.1:53", "status": "down", "rise": 0, "fall": 10, "type": "udp", "port": 0},
+    {"index": 3, "upstream": "udp-cluster", "name": "8.8.8.8:53", "status": "up", "rise": 3, "fall": 0, "type": "udp", "port": 0}
+  ]
+}}
+[root@test2 ngx_healthcheck_module.git]# curl localhost
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+    body {
+        width: 35em;
+        margin: 0 auto;
+        font-family: Tahoma, Verdana, Arial, sans-serif;
     }
-    upstream udp-cluster {
-        # simple round-robin
-        server 192.168.0.3:53;
-        server 192.168.0.4:53;
-        check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=udp;
-    }
-    upstream http-cluster {
-        # simple round-robin
-        server 192.168.0.5:80;
-        server 192.168.0.6:80;
-        check interval=3000 rise=2 fall=5 timeout=5000 type=http;
-        check_keepalive_requests 100;
-        check_http_send "HEAD / HTTP/1.1\r\nConnection: keep-alive\r\n\r\n";
-        check_http_expect_alive http_2xx http_3xx;
-    }
-    server {
-        listen 522;
-        proxy_pass tcp-cluster;
-    }
-    server {
-        listen 53;
-        proxy_pass udp-cluster;
-    }
-    server {
-        listen 8080;
-        proxy_pass http-cluster;
-    }
-}
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
 
-http {
-    server {
-        listen 80;
-        location /status/http {
-            check_status;
-        }
-        location /status/stream {
-            l4check_status;
-        }
-    }
-}
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+[root@test2 ngx_healthcheck_module.git]# 
+
 ```
 # directive
 
