@@ -10,22 +10,29 @@ events {
 http {
     server {
         listen 80;
-
+        # status interface
         location /status/stream {
             l4check_status;
         }
         location /status {
             check_status;
         }
-
+        # http front
         location / { 
           proxy_pass http://http-cluster;
         }   
     }
-
+    # as a backend server.
+    server {
+        listen 8080;
+        location / {
+          root html;
+        }
+    }
+    
     upstream http-cluster {
         # simple round-robin
-        server 127.0.0.1:80;
+        server 127.0.0.1:8080;
         server 127.0.0.2:81;
 
         check interval=3000 rise=2 fall=5 timeout=5000 type=http;
@@ -57,4 +64,3 @@ stream {
     }
     
 }
-
