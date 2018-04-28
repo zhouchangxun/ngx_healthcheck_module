@@ -26,8 +26,8 @@ https://github.com/zhouchangxun/ngx_healthcheck_module/blob/master/nginx.conf.ex
 
 # demo output(use example conf above)
 ``` python
-[root@test2 ngx_healthcheck_module.git]# 
-[root@test2 ngx_healthcheck_module.git]# curl localhost/status?format=json
+[root@test2 ngx_healthcheck_module]# 
+[root@test2 ngx_healthcheck_module]# curl localhost/status?format=json
 {"servers": {
   "total": 2,
   "generation": 1,
@@ -36,7 +36,7 @@ https://github.com/zhouchangxun/ngx_healthcheck_module/blob/master/nginx.conf.ex
     {"index": 1, "upstream": "http-cluster", "name": "127.0.0.2:81", "status": "down", "rise": 0, "fall": 7, "type": "http", "port": 0}
   ]
 }}
-[root@test2 ngx_healthcheck_module.git]# curl localhost/status/stream?format=json
+[root@test2 ngx_healthcheck_module]# curl localhost/status/stream?format=json
 {"servers": {
   "total": 4,
   "generation": 1,
@@ -47,33 +47,7 @@ https://github.com/zhouchangxun/ngx_healthcheck_module/blob/master/nginx.conf.ex
     {"index": 3, "upstream": "udp-cluster", "name": "8.8.8.8:53", "status": "up", "rise": 3, "fall": 0, "type": "udp", "port": 0}
   ]
 }}
-[root@test2 ngx_healthcheck_module.git]# curl localhost
-<!DOCTYPE html>
-<html>
-<head>
-<title>Welcome to nginx!</title>
-<style>
-    body {
-        width: 35em;
-        margin: 0 auto;
-        font-family: Tahoma, Verdana, Arial, sans-serif;
-    }
-</style>
-</head>
-<body>
-<h1>Welcome to nginx!</h1>
-<p>If you see this page, the nginx web server is successfully installed and
-working. Further configuration is required.</p>
-
-<p>For online documentation and support please refer to
-<a href="http://nginx.org/">nginx.org</a>.<br/>
-Commercial support is available at
-<a href="http://nginx.com/">nginx.com</a>.</p>
-
-<p><em>Thank you for using nginx.</em></p>
-</body>
-</html>
-[root@test2 ngx_healthcheck_module.git]# 
+[root@test2 ngx_healthcheck_module]# 
 
 ```
 # directive
