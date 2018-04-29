@@ -1,5 +1,5 @@
 # ngx-healthcheck-module 
-![loading](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module.svg?branch=master)
+![loading](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module.svg?branch=dev)
 - Health-checker for Nginx upstream servers
 (support http upstream && stream upstream)  
 
