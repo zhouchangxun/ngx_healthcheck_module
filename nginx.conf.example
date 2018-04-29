@@ -11,11 +11,8 @@ http {
     server {
         listen 80;
         # status interface
-        location /status/stream {
-            l4check_status;
-        }
         location /status {
-            check_status;
+            healthcheck_status;
         }
         # http front
         location / { 

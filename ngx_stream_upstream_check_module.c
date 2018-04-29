@@ -10,10 +10,7 @@
 #include <ngx_http.h>
 
 #include "ngx_stream_upstream_check_module.h"
-
-typedef struct ngx_stream_upstream_check_peer_s ngx_stream_upstream_check_peer_t;
-typedef struct ngx_stream_upstream_check_srv_conf_s
-        ngx_stream_upstream_check_srv_conf_t;
+#include "common.h.in"
 
 
 typedef struct {
@@ -28,90 +25,11 @@ typedef struct {
 } ngx_stream_upstream_check_ctx_t;
 
 
-typedef struct {
-    ngx_shmtx_t                              mutex;
-#if (nginx_version >= 1002000)
-    ngx_shmtx_sh_t                           lock;
-#else
-    ngx_atomic_t                             lock;
-#endif
-
-    ngx_pid_t                                owner;
-
-    ngx_msec_t                               access_time;
-
-    ngx_uint_t                               fall_count;
-    ngx_uint_t                               rise_count;
-
-    ngx_uint_t                               busyness;
-    ngx_uint_t                               access_count;
-
-    struct sockaddr                         *sockaddr;
-    socklen_t                                socklen;
-
-    ngx_atomic_t                             down;
-    ngx_str_t                               *upstream_name;
-    u_char                                   padding[64];
-} ngx_stream_upstream_check_peer_shm_t;
-
-
-typedef struct {
-    ngx_uint_t                               generation;
-    ngx_uint_t                               checksum;//zhoucx: we can know if peer config file changed by calculate it.
-    ngx_uint_t                               number;
-
-    /* ngx_stream_upstream_check_status_peer_t */
-    ngx_stream_upstream_check_peer_shm_t       peers[1]; //hack: peer[0]
-} ngx_stream_upstream_check_peers_shm_t; 
-                                         /* followed with (peers_num-1)*ngx_stream_upstream_check_peer_shm_t dynamicly,*/      
-                                         /* so we can ref by peers_shm->peers[0],[1],... */
-
-
 #define NGX_HTTP_CHECK_CONNECT_DONE          0x0001
 #define NGX_HTTP_CHECK_SEND_DONE             0x0002
 #define NGX_HTTP_CHECK_RECV_DONE             0x0004
 #define NGX_HTTP_CHECK_ALL_DONE              0x0008
 
-
-typedef ngx_int_t (*ngx_stream_upstream_check_packet_init_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-typedef ngx_int_t (*ngx_stream_upstream_check_packet_parse_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-typedef void (*ngx_stream_upstream_check_packet_clean_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-
-struct ngx_stream_upstream_check_peer_s {
-    ngx_flag_t                               state;
-    ngx_pool_t                              *pool;
-    ngx_uint_t                               index;
-    ngx_uint_t                               max_busy;
-    ngx_str_t                               *upstream_name;
-    ngx_addr_t                              *check_peer_addr;
-    ngx_addr_t                              *peer_addr;
-    ngx_event_t                              check_ev;
-    ngx_event_t                              check_timeout_ev;
-    ngx_peer_connection_t                    pc;
-
-    void                                    *check_data;
-    ngx_event_handler_pt                     send_handler;
-    ngx_event_handler_pt                     recv_handler;
-
-    ngx_stream_upstream_check_packet_init_pt   init; //zhoucx: function ptr
-    ngx_stream_upstream_check_packet_parse_pt  parse;
-    ngx_stream_upstream_check_packet_clean_pt  reinit;
-
-    ngx_stream_upstream_check_peer_shm_t      *shm;
-    ngx_stream_upstream_check_srv_conf_t      *conf;
-};
-
-
-typedef struct {
-    ngx_str_t                                check_shm_name;
-    ngx_uint_t                               checksum;
-    ngx_array_t                              peers;
-
-    ngx_stream_upstream_check_peers_shm_t     *peers_shm;
-} ngx_stream_upstream_check_peers_t;
 
 
 #define NGX_CHECK_TYPE_TCP                   0x0001
@@ -124,28 +42,6 @@ typedef struct {
 #define NGX_CHECK_HTTP_4XX                   0x0008
 #define NGX_CHECK_HTTP_5XX                   0x0010
 #define NGX_CHECK_HTTP_ERR                   0x8000
-
-typedef struct {
-    ngx_uint_t                               type;
-
-    ngx_str_t                                name;
-
-    ngx_str_t                                default_send;
-
-    /* HTTP */
-    ngx_uint_t                               default_status_alive;
-
-    ngx_event_handler_pt                     send_handler;
-    ngx_event_handler_pt                     recv_handler;
-
-    ngx_stream_upstream_check_packet_init_pt   init;
-    ngx_stream_upstream_check_packet_parse_pt  parse;
-    ngx_stream_upstream_check_packet_clean_pt  reinit;
-
-    unsigned need_pool;
-    unsigned need_keepalive;
-} ngx_check_conf_t;
-
 
 typedef void (*ngx_stream_upstream_check_status_format_pt) (ngx_buf_t *b,
                                                             ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag);
@@ -182,24 +78,6 @@ typedef struct {
 } ngx_stream_upstream_check_main_conf_t;
 
 
-struct ngx_stream_upstream_check_srv_conf_s {
-    ngx_uint_t                               port;
-    ngx_uint_t                               fall_count;
-    ngx_uint_t                               rise_count;
-    ngx_msec_t                               check_interval;
-    ngx_msec_t                               check_timeout;
-    ngx_uint_t                               check_keepalive_requests;
-
-    ngx_check_conf_t                        *check_type_conf;
-    ngx_str_t                                send;
-
-    union {
-        ngx_uint_t                           return_code;
-        ngx_uint_t                           status_alive;
-    } code;
-
-    ngx_uint_t                               default_down;
-};
 
 
 typedef struct {
