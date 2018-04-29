@@ -1,30 +1,127 @@
-# ngx_healthcheck_module
+Name
+====
 
-support both http/stream upstream health check (tcp/udp/http),
-and provide a http interface to get backend-server status"
-
+ngx-healthcheck-module - Health-checker for Nginx upstream servers
+(support http upstream && stream upstream)  
 该模块可以为Nginx提供主动式后端服务器健康检查的功能（检查类型支持 tcp/udp/http ）。
 
-# build
+Table of Contents
+=================
 
-## clone nginx code and this module code.
->git clone https://github.com/zhouchangxun/nginx/nginx.git
+* [Name](#name)
+* [Status](#status)
+* [Description](#description)
+* [Installation](#installation)
+* [Usage](#usage)
+* [Synopsis && Directive](#synopsis)
+  * [healthcheck](#healthcheck)
+  * [check](#check)
+* [Bugs and Patches](#bugs-and-patches)
+* [Author](#author)
+* [Copyright and License](#copyright-and-license)
+* [See Also](#see-also)
 
->git clone https://github.com/zhouchangxun/ngx_healthcheck_module.git
+Status
+======
 
-## apply patch to nginx source
-> cd nginx/; git apply ../ngx_healthcheck_module/nginx-stable-1.12+.patch
+This nginx module is still under development but is already production ready.
 
-## append option to enable this module
-> ./auto/configure --with-stream --add-module=../ngx_healthcheck_module/
+Description
+===========
 
-## build and install
->make && make install
+This library performs healthcheck for server peers defined in NGINX `upstream` groups specified by names.
 
-# config examples
-https://github.com/zhouchangxun/ngx_healthcheck_module/blob/master/nginx.conf.example
 
-# demo output(use example conf above)
+Installation
+============
+
+```
+git clone https://github.com/nginx/nginx/nginx.git
+git clone https://github.com/zhouchangxun/ngx_healthcheck_module.git
+
+cd nginx/; 
+git apply ../ngx_healthcheck_module/nginx-stable-1.12+.patch
+
+./auto/configure --with-stream --add-module=../ngx_healthcheck_module/
+make && make install
+```
+
+[Back to TOC](#table-of-contents)
+
+Usage
+=====
+
+**nginx.conf example** 
+```nginx
+user  root;
+worker_processes  1;
+error_log  logs/error.log  info;
+#pid        logs/nginx.pid;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    server {
+        listen 80;
+        # status interface
+        location /status {
+            healthcheck_status;
+        }
+        # http front
+        location / { 
+          proxy_pass http://http-cluster;
+        }   
+    }
+    # as a backend server.
+    server {
+        listen 8080;
+        location / {
+          root html;
+        }
+    }
+    
+    upstream http-cluster {
+        # simple round-robin
+        server 127.0.0.1:8080;
+        server 127.0.0.2:81;
+
+        check interval=3000 rise=2 fall=5 timeout=5000 type=http;
+        check_http_send "GET / HTTP/1.0\r\n\r\n";
+        check_http_expect_alive http_2xx http_3xx;
+    }
+}
+
+stream {
+    upstream tcp-cluster {
+        # simple round-robin
+        server 127.0.0.1:22;
+        server 192.168.0.2:22;
+        check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=tcp;
+    }
+    server {
+        listen 522;
+        proxy_pass tcp-cluster;
+    }
+    
+    upstream udp-cluster {
+        # simple round-robin
+        server 127.0.0.1:53;
+        server 8.8.8.8:53;
+        check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=udp;
+    }
+    server {
+        listen 53;
+        proxy_pass udp-cluster;
+    }
+    
+}
+```
+
+**status interface**
+
+One typical output is
 ``` python
 root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# curl localhost/status
 {"servers": {
@@ -43,78 +140,133 @@ root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# curl localhost/status
 }}
 root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# 
 ```
-# directive
 
-Syntax: 
+[Back to TOC](#table-of-contents)
+
+Synopsis
+========
+
+check
+-----
+
+`Syntax`
 > check interval=milliseconds [fall=count] [rise=count] [timeout=milliseconds] [default_down=true|false] [type=tcp|udp|http] [port=check_port]
 
-Default: interval=30000 fall=5 rise=2 timeout=1000 default_down=true type=tcp
+`Default`: interval=30000 fall=5 rise=2 timeout=1000 default_down=true type=tcp
 
-Context: http/upstream || stream/upstream
+`Context`: http/upstream || stream/upstream
 
 该指令可以打开后端服务器的健康检查功能。
 
-## Detail description
+`Detail`
 
-interval：向后端发送的健康检查包的间隔。
+- interval：向后端发送的健康检查包的间隔。
+- fall(fall_count): 如果连续失败次数达到fall_count，服务器就被认为是down。
+- rise(rise_count): 如果连续成功次数达到rise_count，服务器就被认为是up。
+- timeout: 后端健康请求的超时时间。
+- default_down: 设定初始时服务器的状态，如果是true，就说明默认是down的，如果是false，就是up的。
+  默认值是true，也就是一开始服务器认为是不可用，要等健康检查包达到一定成功次数以后才会被认为是健康的。
+- type：健康检查包的类型，现在支持以下多种类型
+  - tcp：简单的tcp连接，如果连接成功，就说明后端正常。
+  - udp：简单的发送udp报文，如果收到icmp error(主机或端口不可达)，就说明后端异常。(只有stream配置块中支持udp类型检查)
+  - http：发送HTTP请求，通过后端的回复包的状态来判断后端是否存活。
 
-fall(fall_count): 如果连续失败次数达到fall_count，服务器就被认为是down。
+- port: 指定后端服务器的检查端口。你可以指定不同于真实服务的后端服务器的端口，
+比如后端提供的是443端口的应用，你可以去检查80端口的状态来判断后端健康状况。默认是0，表示跟后端server提供真实服务的端口一样。
 
-rise(rise_count): 如果连续成功次数达到rise_count，服务器就被认为是up。
+A example as followed:
+```nginx
+stream {
+    upstream tcp-cluster {
+        # simple round-robin
+        server 127.0.0.1:22;
+        server 192.168.0.2:22;
+        check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=tcp;
+    }
+    server {
+        listen 522;
+        proxy_pass tcp-cluster;
+    }
+    ...
+}
+```
 
-timeout: 后端健康请求的超时时间。
+healthcheck
+-----------
 
-default_down: 设定初始时服务器的状态，如果是true，就说明默认是down的，如果是false，就是up的。默认值是true，也就是一开始服务器认为是不可用，要等健康检查包达到一定成功次数以后才会被认为是健康的。
+`Syntax`: healthcheck_status [html|csv|json]
 
-type：健康检查包的类型，现在支持以下多种类型
+`Default`: healthcheck_status html
 
-- tcp：简单的tcp连接，如果连接成功，就说明后端正常。
-- udp：简单的发送udp报文，如果收到icmp error(主机或端口不可达)，就说明后端异常。(只有stream配置块中支持udp类型检查)
-- http：发送HTTP请求，通过后端的回复包的状态来判断后端是否存活。
+`Context`: http/server/location
 
-port: 指定后端服务器的检查端口。你可以指定不同于真实服务的后端服务器的端口，比如后端提供的是443端口的应用，你可以去检查80端口的状态来判断后端健康状况。默认是0，表示跟后端server提供真实服务的端口一样。
+A example as followed:
+```nginx
+http {
+    server {
+        listen 80;
+        
+        # status interface
+        location /status {
+            healthcheck_status;
+        }
+     ...
+}
+```
 
-Syntax: check_keepalive_requests request_num
-
-Default: 1
-
-Context: http/upstream
-
-该指令可以配置一个连接发送的请求数，其默认值为1，表示Nginx完成1次请求后即关闭连接。
-
-
-Syntax: check_http_send http_packet
-
-Default: "GET / HTTP/1.0\r\n\r\n"
-
-Context: http/upstream
-
-该指令可以配置http健康检查包发送的请求内容。为了减少传输数据量，推荐采用"HEAD"方法。
-
-当采用长连接进行健康检查时，需在该指令中添加keep-alive请求头，如："HEAD / HTTP/1.1\r\nConnection: keep-alive\r\n\r\n"。
-同时，在采用"GET"方法的情况下，请求uri的size不宜过大，确保可以在1个interval内传输完成，否则会被健康检查模块视为后端服务器或网络异常。
+[Back to TOC](#table-of-contents)
 
 
-Syntax: check_http_expect_alive [ http_2xx | http_3xx | http_4xx | http_5xx ]
+Todo List
+=========
 
-Default: http_2xx | http_3xx
+- 增加测试用例
+- 整理、优化代码
+- 规范代码中的log输出
 
-Context: http/upstream
+[Back to TOC](#table-of-contents)
 
-该指令指定HTTP回复的成功状态，默认认为2XX和3XX的状态是健康的。
+Bugs and Patches
+================
 
+Please report bugs or submit patches by
 
-*Syntax*: check_shm_size size
+1. creating issue on the [GitHub Issue](http://github.com/openresty/lua-resty-upstream-healthcheck/issues),
+2. QQ : 373882405
 
-*Default*: 1M
+[Back to TOC](#table-of-contents)
 
-*Contex*: http || stream
+Author
+======
 
-所有的后端服务器健康检查状态都存于共享内存中，该指令可以设置共享内存的大小。默认是1M，如果你有1千台以上的服务器并在配置的时候出现了错误，就可能需要扩大该内存的大小。
+Chance Chou (周长勋) <changxunzhou@qq.com>.
 
-Syntax: healthcheck_status [html|csv|json]
+[Back to TOC](#table-of-contents)
 
-Default: healthcheck_status html
+Copyright and License
+=====================
 
-Context: http/server/location
+This module is licensed under the BSD license.
 
+Copyright (C) 2017-, by zhouchangxun
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+[Back to TOC](#table-of-contents)
+
+See Also
+========
+
+* nginx: http://nginx.org
+
+[Back to TOC](#table-of-contents)
+
+# Welcome Issue or Pull Request. :)
