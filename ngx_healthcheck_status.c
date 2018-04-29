@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017- Changxun Zhou(zhoucx@dtdream.com)
+ * desc: Healthcheck status interface
  */
 
 
@@ -7,9 +8,11 @@
 #include <ngx_core.h>
 #include <ngx_stream.h>
 #include <ngx_http.h>
+
 #include "ngx_stream_upstream_check_module.h"
 
-/////////////////////////checker_status monitor///////////////////////////
+/* inf different c source file, type declare can duplicate. :) */
+
 typedef struct ngx_stream_upstream_check_peer_s ngx_stream_upstream_check_peer_t;
 typedef struct ngx_stream_upstream_check_srv_conf_s ngx_stream_upstream_check_srv_conf_t;
 
@@ -35,19 +38,18 @@ typedef struct {
     struct sockaddr                         *sockaddr;
     socklen_t                                socklen;
 
-    ngx_atomic_t                             down;
+    ngx_atomic_t                             down;          //current status.
     ngx_str_t                               *upstream_name;
     u_char                                   padding[64];
 } ngx_stream_upstream_check_peer_shm_t;
 
 
 typedef struct {
-    ngx_uint_t                               generation;
-    ngx_uint_t                               checksum;//zhoucx: we can know if peer config file changed by calculate it.
-    ngx_uint_t                               number;
+    ngx_uint_t                               generation; // current process generation(==reload_num +1)
+    ngx_uint_t                               checksum;   // we can know if peer config file changed by calculate it.
+    ngx_uint_t                               number;     // peers total num
 
-    /* ngx_stream_upstream_check_status_peer_t */
-    ngx_stream_upstream_check_peer_shm_t       peers[1];
+    ngx_stream_upstream_check_peer_shm_t       peers[1]; // peers status data array.
 } ngx_stream_upstream_check_peers_shm_t;
 
 
@@ -174,6 +176,12 @@ typedef struct {
     ngx_check_status_conf_t                 *format;
 } ngx_stream_upstream_check_loc_conf_t;
 
+
+// external var declare
+  ngx_uint_t ngx_stream_upstream_check_shm_generation ; //reload counter
+  ngx_stream_upstream_check_peers_t *check_peers_ctx ;  //stream peers data
+
+
 //begin check_status function declare
 static ngx_int_t ngx_stream_upstream_check_status_handler(
     ngx_http_request_t *r); 
@@ -200,10 +208,6 @@ static void *ngx_stream_upstream_check_create_loc_conf(ngx_conf_t *cf);
 static char * ngx_stream_upstream_check_merge_loc_conf(ngx_conf_t *cf, 
     void *parent, void *child);
 //end check_status function declare
-
-//l4checker status begin
- ngx_uint_t ngx_stream_upstream_check_shm_generation ; //reload counter
- ngx_stream_upstream_check_peers_t *check_peers_ctx ;
 
 //1 cmd define
 static ngx_command_t  ngx_stream_upstream_check_status_commands[] = {
@@ -343,6 +347,9 @@ ngx_stream_upstream_check_status_handler(ngx_http_request_t *r)
     ngx_stream_upstream_check_loc_conf_t    *uclcf;
     ngx_stream_upstream_check_status_ctx_t  *ctx;
 
+    ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                 "[ngx-healthcheck][http status interface] called");
+
     if (r->method != NGX_HTTP_GET && r->method != NGX_HTTP_HEAD) {
         return NGX_HTTP_NOT_ALLOWED;
     }
@@ -378,11 +385,10 @@ ngx_stream_upstream_check_status_handler(ngx_http_request_t *r)
         }
     }
 
-    peers = check_peers_ctx;
+    peers = check_peers_ctx; // status data provided by stream_upstream_health_check_module.
     if (peers == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                    "stream upstream check module can not find any check "
-                    "server, make sure you've added the check servers");
+                    "[ngx-healthcheck][http status interface] peers == NULL");
 
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
@@ -731,4 +737,4 @@ ngx_http_get_check_status_format_conf(ngx_str_t *str)
 }
 
 
-//end l4checker status
+//end healthcheck status interface
