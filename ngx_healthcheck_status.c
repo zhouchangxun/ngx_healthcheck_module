@@ -11,7 +11,7 @@
 
 #include "ngx_stream_upstream_check_module.h"
 
-/* inf different c source file, type declare can duplicate. :) */
+/* in different c source file, type declare can duplicate. :) */
 
 typedef struct ngx_stream_upstream_check_peer_s ngx_stream_upstream_check_peer_t;
 typedef struct ngx_stream_upstream_check_srv_conf_s ngx_stream_upstream_check_srv_conf_t;
@@ -178,8 +178,9 @@ typedef struct {
 
 
 // external var declare
-  ngx_uint_t ngx_stream_upstream_check_shm_generation ; //reload counter
-  ngx_stream_upstream_check_peers_t *check_peers_ctx ;  //stream peers data
+  extern ngx_uint_t ngx_stream_upstream_check_shm_generation ; //reload counter
+  extern ngx_stream_upstream_check_peers_t *stream_peers_ctx ;  //stream peers data
+  //extern ngx_http_upstream_check_peers_t *http_peers_ctx ; // http peers data
 
 
 //begin check_status function declare
@@ -385,7 +386,7 @@ ngx_stream_upstream_check_status_handler(ngx_http_request_t *r)
         }
     }
 
-    peers = check_peers_ctx; // status data provided by stream_upstream_health_check_module.
+    peers = stream_peers_ctx; // status data provided by stream_upstream_health_check_module.
     if (peers == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "[ngx-healthcheck][http status interface] peers == NULL");

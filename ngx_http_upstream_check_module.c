@@ -1,4 +1,10 @@
 /*
+ * Copyright (C) 2017- Changxun Zhou(zhoucx@dtdream.com)
+ * desc: http upstream server health check.
+ * note: base on https://github.com/yaoweibin/nginx_upstream_check_module
+ */
+
+/* Thanks:
  * Copyright (C) 2010-2014 Weibin Yao (yaoweibin@gmail.com)
  * Copyright (C) 2010-2014 Alibaba Group Holding Limited
  */
@@ -760,7 +766,7 @@ static ngx_check_status_command_t ngx_check_status_commands[] =  {
 
 
 static ngx_uint_t ngx_http_upstream_check_shm_generation = 0;
-static ngx_http_upstream_check_peers_t *check_peers_ctx = NULL;
+ngx_http_upstream_check_peers_t *http_peers_ctx = NULL;
 
 
 ngx_uint_t
@@ -888,11 +894,11 @@ ngx_http_upstream_check_peer_down(ngx_uint_t index)
 {
     ngx_http_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (http_peers_ctx == NULL || index >= http_peers_ctx->peers.nelts) {
         return 0;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = http_peers_ctx->peers.elts;
 
     return (peer[index].shm->down);
 }
@@ -904,11 +910,11 @@ ngx_http_upstream_check_get_peer(ngx_uint_t index)
 {
     ngx_http_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (http_peers_ctx == NULL || index >= http_peers_ctx->peers.nelts) {
         return;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = http_peers_ctx->peers.elts;
 
     ngx_shmtx_lock(&peer[index].shm->mutex);
 
@@ -924,11 +930,11 @@ ngx_http_upstream_check_free_peer(ngx_uint_t index)
 {
     ngx_http_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (http_peers_ctx == NULL || index >= http_peers_ctx->peers.nelts) {
         return;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = http_peers_ctx->peers.elts;
 
     ngx_shmtx_lock(&peer[index].shm->mutex);
 
@@ -952,7 +958,7 @@ ngx_http_upstream_check_add_timers(ngx_cycle_t *cycle)
     ngx_http_upstream_check_peer_shm_t  *peer_shm;
     ngx_http_upstream_check_peers_shm_t *peers_shm;
 
-    peers = check_peers_ctx;
+    peers = http_peers_ctx;
     if (peers == NULL) {
         return NGX_OK;
     }
@@ -1031,7 +1037,7 @@ ngx_http_upstream_check_begin_handler(ngx_event_t *event)
         return;
     }
 
-    peers = check_peers_ctx;
+    peers = http_peers_ctx;
     if (peers == NULL) {
         return;
     }
@@ -2631,7 +2637,7 @@ ngx_http_upstream_check_clear_all_events()
 
     static ngx_flag_t                has_cleared = 0;
 
-    if (has_cleared || check_peers_ctx == NULL) {
+    if (has_cleared || http_peers_ctx == NULL) {
         return;
     }
 
@@ -2640,7 +2646,7 @@ ngx_http_upstream_check_clear_all_events()
 
     has_cleared = 1;
 
-    peers = check_peers_ctx;
+    peers = http_peers_ctx;
 
     peer = peers->peers.elts;
     for (i = 0; i < peers->peers.nelts; i++) {
@@ -2713,7 +2719,7 @@ ngx_http_upstream_check_status_handler(ngx_http_request_t *r)
         }
     }
 
-    peers = check_peers_ctx;
+    peers = http_peers_ctx;
     if (peers == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "http upstream check module can not find any check "
@@ -3752,12 +3758,12 @@ ngx_http_upstream_check_init_shm(ngx_conf_t *cf, void *conf)
                        shm_name, shm_size);
 
         shm_zone->data = cf->pool;
-        check_peers_ctx = ucmcf->peers;
+        http_peers_ctx = ucmcf->peers;
 
         shm_zone->init = ngx_http_upstream_check_init_shm_zone;
     }
     else {
-         check_peers_ctx = NULL;
+         http_peers_ctx = NULL;
     }
 
     return NGX_CONF_OK;
@@ -3805,7 +3811,7 @@ ngx_http_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     ngx_str_null(&oshm_name);
 
     same = 0;
-    peers = check_peers_ctx;
+    peers = http_peers_ctx;
     if (peers == NULL) {
         return NGX_OK;
     }

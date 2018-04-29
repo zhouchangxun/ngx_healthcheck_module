@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017- Changxun Zhou(zhoucx@dtdream.com)
+ * desc: stream upstream server health check.
  */
 
 
@@ -113,9 +114,9 @@ typedef struct {
 } ngx_stream_upstream_check_peers_t;
 
 
-#define NGX_HTTP_CHECK_TCP                   0x0001
-#define NGX_HTTP_CHECK_HTTP                  0x0002
-#define NGX_HTTP_CHECK_UDP                   0x0004
+#define NGX_CHECK_TYPE_TCP                   0x0001
+#define NGX_CHECK_TYPE_HTTP                  0x0002
+#define NGX_CHECK_TYPE_UDP                   0x0004
 
 
 #define NGX_CHECK_HTTP_2XX                   0x0002
@@ -376,7 +377,7 @@ ngx_module_t  ngx_stream_upstream_check_module = {
 
 static ngx_check_conf_t  ngx_check_types[] = {
 
-        { NGX_HTTP_CHECK_TCP,
+        { NGX_CHECK_TYPE_TCP,
                 ngx_string("tcp"),
                 ngx_null_string,
                 0,
@@ -387,7 +388,7 @@ static ngx_check_conf_t  ngx_check_types[] = {
                 NULL,
                 0,   //zhoucx: need_pool ? no, we just connect peer.
                 0 }, //zhoucx: need_keepalive ? i change it to no
-        { NGX_HTTP_CHECK_UDP,
+        { NGX_CHECK_TYPE_UDP,
                 ngx_string("udp"),
                 ngx_string("X"),/* zhoucx: default send data.
                                  (we must send some data and then call recv to trigger icmp error response).*/
@@ -399,7 +400,7 @@ static ngx_check_conf_t  ngx_check_types[] = {
                 ngx_stream_upstream_check_http_reinit,
                 1,    // (changxun): when send data, we need pool
                 0 },
-        { NGX_HTTP_CHECK_HTTP,
+        { NGX_CHECK_TYPE_HTTP,
                 ngx_string("http"),
                 ngx_string("GET / HTTP/1.0\r\n\r\n"),
                 NGX_CONF_BITMASK_SET | NGX_CHECK_HTTP_2XX | NGX_CHECK_HTTP_3XX,
@@ -424,10 +425,9 @@ static ngx_check_conf_t  ngx_check_types[] = {
                 0 }
 };
 
-//static ngx_uint_t ngx_stream_upstream_check_shm_generation = 0; //zhoucx: what's mean?
-//static ngx_stream_upstream_check_peers_t *check_peers_ctx = NULL;
+/* external glabal var*/
  ngx_uint_t ngx_stream_upstream_check_shm_generation = 0; //reload counter
- ngx_stream_upstream_check_peers_t *check_peers_ctx = NULL; //need by check status module
+ ngx_stream_upstream_check_peers_t *stream_peers_ctx = NULL; //need by check status module
 
 
 ngx_uint_t
@@ -559,11 +559,11 @@ ngx_stream_upstream_check_peer_down(ngx_uint_t index)
 {
     ngx_stream_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return 0;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = stream_peers_ctx->peers.elts;
 
     return (peer[index].shm->down);
 }
@@ -575,11 +575,11 @@ ngx_stream_upstream_check_get_peer(ngx_uint_t index)
 {
     ngx_stream_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = stream_peers_ctx->peers.elts;
 
     ngx_shmtx_lock(&peer[index].shm->mutex);
 
@@ -595,11 +595,11 @@ ngx_stream_upstream_check_free_peer(ngx_uint_t index)
 {
     ngx_stream_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = stream_peers_ctx->peers.elts;
 
     ngx_shmtx_lock(&peer[index].shm->mutex);
 
@@ -623,7 +623,7 @@ ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle)
     ngx_stream_upstream_check_peer_shm_t  *peer_shm;
     ngx_stream_upstream_check_peers_shm_t *peers_shm;
 
-    peers = check_peers_ctx;
+    peers = stream_peers_ctx;
     if (peers == NULL) {
         ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
                      "[ngx-healthcheck][init_process][bug]peers==NULL");
@@ -705,7 +705,7 @@ ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
     ngx_stream_upstream_check_peers_shm_t *peers_shm;
 
 
-    peers = check_peers_ctx;
+    peers = stream_peers_ctx;
     if (peers == NULL) {
         return;
     }
@@ -813,7 +813,7 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
     peer->pc.sockaddr = peer->check_peer_addr->sockaddr;
     peer->pc.socklen = peer->check_peer_addr->socklen;
     peer->pc.name = &peer->check_peer_addr->name;
-    peer->pc.type = (ucscf->check_type_conf->type==NGX_HTTP_CHECK_UDP)?SOCK_DGRAM:SOCK_STREAM;
+    peer->pc.type = (ucscf->check_type_conf->type==NGX_CHECK_TYPE_UDP)?SOCK_DGRAM:SOCK_STREAM;
 
     peer->pc.get = ngx_event_get_peer;
     peer->pc.log = event->log;
@@ -1630,7 +1630,7 @@ ngx_stream_upstream_check_clear_all_events()
 
     static ngx_flag_t                has_cleared = 0; // note: this static var.
 
-    if (has_cleared || check_peers_ctx == NULL) {
+    if (has_cleared || stream_peers_ctx == NULL) {
         return;
     }
 
@@ -1639,7 +1639,7 @@ ngx_stream_upstream_check_clear_all_events()
 
     has_cleared = 1;
 
-    peers = check_peers_ctx;
+    peers = stream_peers_ctx;
 
     peer = peers->peers.elts;
     for (i = 0; i < peers->peers.nelts; i++) {
@@ -2115,12 +2115,12 @@ ngx_stream_upstream_check_init_shm(ngx_conf_t *cf, void *conf)
 
 
         shm_zone->data = cf->pool;
-        check_peers_ctx = ucmcf->peers; //init global var: check_peers_ctx obj.
+        stream_peers_ctx = ucmcf->peers; //init global var: stream_peers_ctx obj.
 
         shm_zone->init = ngx_stream_upstream_check_init_shm_zone;
     }
     else {
-        check_peers_ctx = NULL;
+        stream_peers_ctx = NULL;
     }
 
     return NGX_CONF_OK;
@@ -2173,7 +2173,7 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
                   "[ngx-healthcheck][stream][shm_zone] init callback");
 
-    peers = check_peers_ctx;
+    peers = stream_peers_ctx;
     if (peers == NULL) {
         return NGX_OK;
     }
