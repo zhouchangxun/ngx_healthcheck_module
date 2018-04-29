@@ -1,14 +1,13 @@
-Name
-====
+# ngx-healthcheck-module 
 
-ngx-healthcheck-module - Health-checker for Nginx upstream servers
+- Health-checker for Nginx upstream servers
 (support http upstream && stream upstream)  
-该模块可以为Nginx提供主动式后端服务器健康检查的功能（检查类型支持 tcp/udp/http ）。
+
+该模块可以为Nginx提供主动式后端服务器健康检查的功能（同时支持四层和七层后端服务器的健康检测）。
 
 Table of Contents
 =================
 
-* [Name](#name)
 * [Status](#status)
 * [Description](#description)
 * [Installation](#installation)
@@ -24,13 +23,23 @@ Table of Contents
 Status
 ======
 
-This nginx module is still under development but is already production ready.
+This nginx module is still under development， you can help improve and it.
+
+这个项目还在开发中完善中，欢迎贡献代码，或报告bug。一起使它变得更好。
 
 Description
 ===========
 
-This library performs healthcheck for server peers defined in NGINX `upstream` groups specified by names.
+当你使用nginx作为负载均衡器时，nginx原生只提供了基本的重试方式来保证访问到正常的后端服务器。  
 
+相比之下，这个nginx第三方模块可以对后端服务器提供主动式的健康状态检测。  
+它维护了一个后端服务器列表，保证新的请求直接发送到一个健康的后端服务器。
+
+主要特性：
+- 同时支持四层和七层后端服务器的健康检测
+- 四层支持的检测类型：tcp / udp / http
+- 七层支持的检测类型：http / fastcgi
+- 提供一个统一的http状态查询接口，输出格式：html / json / csv
 
 Installation
 ============
@@ -229,10 +238,13 @@ Todo List
 Bugs and Patches
 ================
 
-Please report bugs or submit patches by
+Please report bugs 
 
-1. creating issue on the [GitHub Issue](http://github.com/openresty/lua-resty-upstream-healthcheck/issues),
-2. QQ : 373882405
+- create [GitHub Issue](http://github.com/zhouchangxun/ngx_healthcheck_module/issues),
+
+or submit patches by
+
+- new [Pull request](https://github.com/zhouchangxun/ngx_healthcheck_module/pull/new/master)
 
 [Back to TOC](#table-of-contents)
 
@@ -246,9 +258,15 @@ Chance Chou (周长勋) <changxunzhou@qq.com>.
 Copyright and License
 =====================
 
+The health check part is based on Yaoweibin's
+    healthcheck module nginx_upstream_check_module
+    (<http://github.com/yaoweibin/nginx_upstream_check_module>);
+    
 This module is licensed under the BSD license.
 
-Copyright (C) 2017-, by zhouchangxun
+Copyright (C) 2017-, by Changxun Zhou <changxunzhou@qq.com>
+
+Copyright (C) 2014 by Weibin Yao <yaoweibin@gmail.com>
 
 All rights reserved.
 
@@ -269,4 +287,3 @@ See Also
 
 [Back to TOC](#table-of-contents)
 
-# Welcome Issue or Pull Request. :)
