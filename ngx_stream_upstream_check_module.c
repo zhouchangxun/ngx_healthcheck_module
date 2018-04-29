@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017- Changxun Zhou(zhoucx@dtdream.com)
+ * desc: stream upstream server health check.
  */
 
 
@@ -7,11 +8,9 @@
 #include <ngx_core.h>
 #include <ngx_stream.h>
 #include <ngx_http.h>
-#include "ngx_stream_upstream_check_module.h"
 
-typedef struct ngx_stream_upstream_check_peer_s ngx_stream_upstream_check_peer_t;
-typedef struct ngx_stream_upstream_check_srv_conf_s
-        ngx_stream_upstream_check_srv_conf_t;
+#include "ngx_stream_upstream_check_module.h"
+#include "common.h.in"
 
 
 typedef struct {
@@ -26,93 +25,16 @@ typedef struct {
 } ngx_stream_upstream_check_ctx_t;
 
 
-typedef struct {
-    ngx_shmtx_t                              mutex;
-#if (nginx_version >= 1002000)
-    ngx_shmtx_sh_t                           lock;
-#else
-    ngx_atomic_t                             lock;
-#endif
-
-    ngx_pid_t                                owner;
-
-    ngx_msec_t                               access_time;
-
-    ngx_uint_t                               fall_count;
-    ngx_uint_t                               rise_count;
-
-    ngx_uint_t                               busyness;
-    ngx_uint_t                               access_count;
-
-    struct sockaddr                         *sockaddr;
-    socklen_t                                socklen;
-
-    ngx_atomic_t                             down;
-    ngx_str_t                               *upstream_name;
-    u_char                                   padding[64];
-} ngx_stream_upstream_check_peer_shm_t;
-
-
-typedef struct {
-    ngx_uint_t                               generation;
-    ngx_uint_t                               checksum;//zhoucx: we can know if peer config file changed by calculate it.
-    ngx_uint_t                               number;
-
-    /* ngx_stream_upstream_check_status_peer_t */
-    ngx_stream_upstream_check_peer_shm_t       peers[1];
-} ngx_stream_upstream_check_peers_shm_t;
-
-
 #define NGX_HTTP_CHECK_CONNECT_DONE          0x0001
 #define NGX_HTTP_CHECK_SEND_DONE             0x0002
 #define NGX_HTTP_CHECK_RECV_DONE             0x0004
 #define NGX_HTTP_CHECK_ALL_DONE              0x0008
 
 
-typedef ngx_int_t (*ngx_stream_upstream_check_packet_init_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-typedef ngx_int_t (*ngx_stream_upstream_check_packet_parse_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-typedef void (*ngx_stream_upstream_check_packet_clean_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
 
-struct ngx_stream_upstream_check_peer_s {
-    ngx_flag_t                               state;
-    ngx_pool_t                              *pool;
-    ngx_uint_t                               index;
-    ngx_uint_t                               max_busy;
-    ngx_str_t                               *upstream_name;
-    ngx_addr_t                              *check_peer_addr;
-    ngx_addr_t                              *peer_addr;
-    ngx_event_t                              check_ev;
-    ngx_event_t                              check_timeout_ev;
-    ngx_peer_connection_t                    pc;
-
-    void                                    *check_data;
-    ngx_event_handler_pt                     send_handler;
-    ngx_event_handler_pt                     recv_handler;
-
-    ngx_stream_upstream_check_packet_init_pt   init; //zhoucx: function ptr
-    ngx_stream_upstream_check_packet_parse_pt  parse;
-    ngx_stream_upstream_check_packet_clean_pt  reinit;
-
-    ngx_stream_upstream_check_peer_shm_t      *shm;
-    ngx_stream_upstream_check_srv_conf_t      *conf;
-};
-
-
-typedef struct {
-    ngx_str_t                                check_shm_name;
-    ngx_uint_t                               checksum;
-    ngx_array_t                              peers;
-
-    ngx_stream_upstream_check_peers_shm_t     *peers_shm;
-} ngx_stream_upstream_check_peers_t;
-
-
-#define NGX_HTTP_CHECK_TCP                   0x0001
-#define NGX_HTTP_CHECK_HTTP                  0x0002
-#define NGX_HTTP_CHECK_UDP                   0x0004
+#define NGX_CHECK_TYPE_TCP                   0x0001
+#define NGX_CHECK_TYPE_HTTP                  0x0002
+#define NGX_CHECK_TYPE_UDP                   0x0004
 
 
 #define NGX_CHECK_HTTP_2XX                   0x0002
@@ -120,28 +42,6 @@ typedef struct {
 #define NGX_CHECK_HTTP_4XX                   0x0008
 #define NGX_CHECK_HTTP_5XX                   0x0010
 #define NGX_CHECK_HTTP_ERR                   0x8000
-
-typedef struct {
-    ngx_uint_t                               type;
-
-    ngx_str_t                                name;
-
-    ngx_str_t                                default_send;
-
-    /* HTTP */
-    ngx_uint_t                               default_status_alive;
-
-    ngx_event_handler_pt                     send_handler;
-    ngx_event_handler_pt                     recv_handler;
-
-    ngx_stream_upstream_check_packet_init_pt   init;
-    ngx_stream_upstream_check_packet_parse_pt  parse;
-    ngx_stream_upstream_check_packet_clean_pt  reinit;
-
-    unsigned need_pool;
-    unsigned need_keepalive;
-} ngx_check_conf_t;
-
 
 typedef void (*ngx_stream_upstream_check_status_format_pt) (ngx_buf_t *b,
                                                             ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag);
@@ -178,24 +78,6 @@ typedef struct {
 } ngx_stream_upstream_check_main_conf_t;
 
 
-struct ngx_stream_upstream_check_srv_conf_s {
-    ngx_uint_t                               port;
-    ngx_uint_t                               fall_count;
-    ngx_uint_t                               rise_count;
-    ngx_msec_t                               check_interval;
-    ngx_msec_t                               check_timeout;
-    ngx_uint_t                               check_keepalive_requests;
-
-    ngx_check_conf_t                        *check_type_conf;
-    ngx_str_t                                send;
-
-    union {
-        ngx_uint_t                           return_code;
-        ngx_uint_t                           status_alive;
-    } code;
-
-    ngx_uint_t                               default_down;
-};
 
 
 typedef struct {
@@ -373,7 +255,7 @@ ngx_module_t  ngx_stream_upstream_check_module = {
 
 static ngx_check_conf_t  ngx_check_types[] = {
 
-        { NGX_HTTP_CHECK_TCP,
+        { NGX_CHECK_TYPE_TCP,
                 ngx_string("tcp"),
                 ngx_null_string,
                 0,
@@ -382,9 +264,9 @@ static ngx_check_conf_t  ngx_check_types[] = {
                 NULL,
                 NULL,
                 NULL,
-                0,   //zhoucx: need_pool ?
+                0,   //zhoucx: need_pool ? no, we just connect peer.
                 0 }, //zhoucx: need_keepalive ? i change it to no
-        { NGX_HTTP_CHECK_UDP,
+        { NGX_CHECK_TYPE_UDP,
                 ngx_string("udp"),
                 ngx_string("X"),/* zhoucx: default send data.
                                  (we must send some data and then call recv to trigger icmp error response).*/
@@ -394,9 +276,9 @@ static ngx_check_conf_t  ngx_check_types[] = {
                 ngx_stream_upstream_check_http_init,
                 NULL,
                 ngx_stream_upstream_check_http_reinit,
-                1,
+                1,    // (changxun): when send data, we need pool
                 0 },
-        { NGX_HTTP_CHECK_HTTP,
+        { NGX_CHECK_TYPE_HTTP,
                 ngx_string("http"),
                 ngx_string("GET / HTTP/1.0\r\n\r\n"),
                 NGX_CONF_BITMASK_SET | NGX_CHECK_HTTP_2XX | NGX_CHECK_HTTP_3XX,
@@ -421,10 +303,9 @@ static ngx_check_conf_t  ngx_check_types[] = {
                 0 }
 };
 
-//static ngx_uint_t ngx_stream_upstream_check_shm_generation = 0; //zhoucx: what's mean?
-//static ngx_stream_upstream_check_peers_t *check_peers_ctx = NULL;
+/* external glabal var*/
  ngx_uint_t ngx_stream_upstream_check_shm_generation = 0; //reload counter
- ngx_stream_upstream_check_peers_t *check_peers_ctx = NULL;
+ ngx_stream_upstream_check_peers_t *stream_peers_ctx = NULL; //need by check status module
 
 
 ngx_uint_t
@@ -436,8 +317,8 @@ ngx_stream_upstream_check_add_peer(ngx_conf_t *cf,
     ngx_stream_upstream_check_srv_conf_t   *ucscf;
     ngx_stream_upstream_check_main_conf_t  *ucmcf;
 
-    ngx_log_error(NGX_LOG_INFO, cf->log, 0,
-                      "add a peer:( %V ) to stream health check list.",
+    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
+                      "[ngx-healthcheck][stream][called by stream module] add a peer:( %V ) to health check list.",
                       &peer_addr->name);
 
     if (us->srv_conf == NULL) {
@@ -556,11 +437,11 @@ ngx_stream_upstream_check_peer_down(ngx_uint_t index)
 {
     ngx_stream_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return 0;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = stream_peers_ctx->peers.elts;
 
     return (peer[index].shm->down);
 }
@@ -572,11 +453,11 @@ ngx_stream_upstream_check_get_peer(ngx_uint_t index)
 {
     ngx_stream_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = stream_peers_ctx->peers.elts;
 
     ngx_shmtx_lock(&peer[index].shm->mutex);
 
@@ -592,11 +473,11 @@ ngx_stream_upstream_check_free_peer(ngx_uint_t index)
 {
     ngx_stream_upstream_check_peer_t  *peer;
 
-    if (check_peers_ctx == NULL || index >= check_peers_ctx->peers.nelts) {
+    if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return;
     }
 
-    peer = check_peers_ctx->peers.elts;
+    peer = stream_peers_ctx->peers.elts;
 
     ngx_shmtx_lock(&peer[index].shm->mutex);
 
@@ -620,20 +501,24 @@ ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle)
     ngx_stream_upstream_check_peer_shm_t  *peer_shm;
     ngx_stream_upstream_check_peers_shm_t *peers_shm;
 
-    peers = check_peers_ctx;
+    peers = stream_peers_ctx;
     if (peers == NULL) {
+        ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
+                     "[ngx-healthcheck][init_process][bug]peers==NULL");
         return NGX_OK;
     }
 
     peers_shm = peers->peers_shm;
     if (peers_shm == NULL) {
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                     "[ngx-healthcheck][stream][timers][when init process]"
+                     "no peers, so skip add timers");
         return NGX_OK;
     }
 
-    ngx_log_debug2(NGX_LOG_DEBUG_STREAM, cycle->log, 0,
-                   "stream check upstream init_process, shm_name: %V, "
-                           "peer number: %ud",
-                   &peers->check_shm_name,
+    ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                   "[ngx-healthcheck][stream][timers][when init process]"
+                   "start check-timer for %ud peers",
                    peers->peers.nelts);
 
     srandom(ngx_pid);
@@ -644,7 +529,8 @@ ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle)
     for (i = 0; i < peers->peers.nelts; i++) {
         peer[i].shm = &peer_shm[i];
 
-        peer[i].check_ev.handler = ngx_stream_upstream_check_begin_handler;
+        peer[i].check_ev.handler = 
+                ngx_stream_upstream_check_begin_handler;
         peer[i].check_ev.log = cycle->log;
         peer[i].check_ev.data = &peer[i];
         peer[i].check_ev.timer_set = 0;
@@ -676,8 +562,9 @@ ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle)
          * We add a random start time here, since we don't want to trigger
          * the check events too close to each other at the beginning.
          */
+        // ensure interval >= 1000ms.
         delay = ucscf->check_interval > 1000 ? ucscf->check_interval : 1000;
-        t = ngx_random() % delay;
+        t = ngx_random() % delay; // t in range(0~999 ms)
 
         ngx_add_timer(&peer[i].check_ev, t);
     }
@@ -695,11 +582,8 @@ ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
     ngx_stream_upstream_check_srv_conf_t  *ucscf;
     ngx_stream_upstream_check_peers_shm_t *peers_shm;
 
-    if (ngx_stream_upstream_check_need_exit()) {
-        return;
-    }
 
-    peers = check_peers_ctx;
+    peers = stream_peers_ctx;
     if (peers == NULL) {
         return;
     }
@@ -711,6 +595,14 @@ ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
 
     peer = event->data;
     ucscf = peer->conf;
+
+    if (ngx_stream_upstream_check_need_exit()) {
+        ngx_log_error(NGX_LOG_NOTICE, event->log, 0,
+                   "[ngx-healthcheck][stream][check-handler][when begin check]"
+                   "recv exit signal, skip current check for peer:(%V)", 
+                   &peer->check_peer_addr->name);
+        return;
+    }
 
     ngx_add_timer(event, ucscf->check_interval / 2);//zhoucx: what's mean?
 
@@ -757,6 +649,10 @@ ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
     ngx_shmtx_unlock(&peer->shm->mutex);
 
     if (peer->shm->owner == ngx_pid) {
+        ngx_log_error(NGX_LOG_INFO, event->log, 0,
+                   "[ngx-healthcheck][stream][check-event][when begin check]"
+                   "restart a check for peer:(%V)", 
+                   &peer->check_peer_addr->name);
         ngx_stream_upstream_check_connect_handler(event);
     }
 }
@@ -770,12 +666,16 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
     ngx_stream_upstream_check_peer_t      *peer;
     ngx_stream_upstream_check_srv_conf_t  *ucscf;
 
-    if (ngx_stream_upstream_check_need_exit()) {
-        return;
-    }
-
     peer = event->data;
     ucscf = peer->conf;
+
+    if (ngx_stream_upstream_check_need_exit()) {
+        ngx_log_error(NGX_LOG_NOTICE, event->log, 0,
+                   "[ngx-healthcheck][stream][check-handler][when connect peer]"
+                   "recv exit signal, skip current check for peer:(%V)", 
+                   &peer->check_peer_addr->name);
+        return;
+    }
 
     if (peer->pc.connection != NULL) {
         c = peer->pc.connection;
@@ -791,7 +691,7 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
     peer->pc.sockaddr = peer->check_peer_addr->sockaddr;
     peer->pc.socklen = peer->check_peer_addr->socklen;
     peer->pc.name = &peer->check_peer_addr->name;
-    peer->pc.type = (ucscf->check_type_conf->type==NGX_HTTP_CHECK_UDP)?SOCK_DGRAM:SOCK_STREAM;
+    peer->pc.type = (ucscf->check_type_conf->type==NGX_CHECK_TYPE_UDP)?SOCK_DGRAM:SOCK_STREAM;
 
     peer->pc.get = ngx_event_get_peer;
     peer->pc.log = event->log;
@@ -800,10 +700,10 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
     peer->pc.cached = 0;
     peer->pc.connection = NULL;
 
-    rc = ngx_event_connect_peer(&peer->pc);
+    rc = ngx_event_connect_peer(&peer->pc); // (changxun): noblocking .
 
     if (rc == NGX_ERROR || rc == NGX_DECLINED) {
-        ngx_stream_upstream_check_status_update(peer, 0);
+        ngx_stream_upstream_check_status_update(peer, 0); //set down
         return;
     }
 
@@ -816,7 +716,7 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
     c->write->log = c->log;
     c->pool = peer->pool;
 
-	//zhoucx: set sock opt "IP_RECVERR" in order to recv icmp error like host unreachable.
+    /* (changxun): set sock opt "IP_RECVERR" in order to recv icmp error like host/port unreachable. */
     int val = 1;
     if( setsockopt( c->fd, SOL_IP, IP_RECVERR, &val, sizeof(val) ) == -1 ){
         ngx_log_error(NGX_LOG_ERR, event->log, 0,
@@ -848,8 +748,9 @@ ngx_stream_upstream_check_peek_one_byte(ngx_connection_t *c)
     n = recv(c->fd, buf, 1, MSG_PEEK);
     err = ngx_socket_errno;
 
-    ngx_log_debug2(NGX_LOG_DEBUG_STREAM, c->log, err,
-                   "stream check upstream recv(): %i, fd: %d",
+    ngx_log_error(NGX_LOG_INFO, c->log, err,
+                   "[ngx-healthcheck][stream] when recv one byte,"
+                   " recv(): %i, fd: %d",
                    n, c->fd);
 
     if (n == 1 || (n == -1 && err == NGX_EAGAIN)) {
@@ -873,11 +774,11 @@ ngx_stream_upstream_check_peek_handler(ngx_event_t *event)
     peer = c->data;
 
     if (ngx_stream_upstream_check_peek_one_byte(c) == NGX_OK) {
-        ngx_stream_upstream_check_status_update(peer, 1);
+        ngx_stream_upstream_check_status_update(peer, 1); //up
 
     } else {
         c->error = 1;
-        ngx_stream_upstream_check_status_update(peer, 0);
+        ngx_stream_upstream_check_status_update(peer, 0); //down
     }
 
     ngx_stream_upstream_check_clean_event(peer);
@@ -958,7 +859,9 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
     c = event->data;
     peer = c->data;
 
-    ngx_log_debug0(NGX_LOG_DEBUG_STREAM, c->log, 0, "stream check send.");
+    ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                     "[ngx-healthcheck][stream][send-handler] for peer:%V",
+                     &peer->check_peer_addr->name);
 
     if (c->pool == NULL) {
         ngx_log_error(NGX_LOG_ERR, event->log, 0,
@@ -978,7 +881,7 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
             goto check_send_fail;
         }
 
-        return;
+        return; // (changxun): wait future connect event.
     }
 
     if (peer->check_data == NULL) {
@@ -1002,19 +905,18 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
     ctx = peer->check_data;
 
     while (ctx->send.pos < ctx->send.last) {
-
+        /* send check data */
         size = c->send(c, ctx->send.pos, ctx->send.last - ctx->send.pos);
 
-#if (NGX_DEBUG)
         {
         ngx_err_t  err;
 
         err = (size >=0) ? 0 : ngx_socket_errno;
-        ngx_log_error(NGX_LOG_DEBUG, ngx_cycle->log, err,
-                       "stream check send size: %z, total: %z",
-                       size, ctx->send.last - ctx->send.pos);
+        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, err,
+                       "[ngx-healthcheck][stream][send-handler]" 
+                       "send check data size: %z, total: %z for peer:%V",
+                       size, ctx->send.last - ctx->send.pos, &peer->check_peer_addr->name);
         }
-#endif
 
         if (size > 0) {
             ctx->send.pos += size;
@@ -1027,12 +929,14 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
     }
 
     if (ctx->send.pos == ctx->send.last) {
-        ngx_log_debug0(NGX_LOG_DEBUG_STREAM, c->log, 0, "stream check send done.");
+        ngx_log_error(NGX_LOG_INFO, c->log, 0,
+                     "[ngx-healthcheck][stream][send-handler] send finish for peer:%V",
+                     &peer->check_peer_addr->name);
         peer->state = NGX_HTTP_CHECK_SEND_DONE;
         c->requests++;
     }
 
-    return;
+    return; // normal return;
 
     check_send_fail:
     ngx_stream_upstream_check_status_update(peer, 0);
@@ -1134,7 +1038,7 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
         case NGX_AGAIN:
             /* The peer has closed its half side of the connection. */
             if (size == 0) {
-                ngx_stream_upstream_check_status_update(peer, 0);
+                ngx_stream_upstream_check_status_update(peer, 0); //down
                 c->error = 1;
                 break;
             }
@@ -1147,14 +1051,14 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
                           &peer->conf->check_type_conf->name,
                           &peer->check_peer_addr->name);
 
-            ngx_stream_upstream_check_status_update(peer, 0);
+            ngx_stream_upstream_check_status_update(peer, 0); // (changxun): set down
             break;
 
         case NGX_OK:
             /* fall through */
 
         default:
-            ngx_stream_upstream_check_status_update(peer, 1);
+            ngx_stream_upstream_check_status_update(peer, 1); // (changxun): set up
             break;
     }
 
@@ -1163,7 +1067,7 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
     return;
 
     check_recv_fail:
-    ngx_stream_upstream_check_status_update(peer, 0);
+    ngx_stream_upstream_check_status_update(peer, 0); //down
     ngx_stream_upstream_check_clean_event(peer);
 }
 
@@ -1471,13 +1375,14 @@ ngx_stream_upstream_check_status_update(ngx_stream_upstream_check_peer_t *peer,
 
     ucscf = peer->conf;
 
-    if (result) {
+    if (result) { //up
         peer->shm->rise_count++;
         peer->shm->fall_count = 0;
         if (peer->shm->down && peer->shm->rise_count >= ucscf->rise_count) {
             peer->shm->down = 0;
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                          "enable check peer: %V ",
+            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+                          "[ngx-healthcheck][stream][status-update]"
+                          " change status to UP for peer: %V ",
                           &peer->check_peer_addr->name);
         }
     } else {
@@ -1485,8 +1390,9 @@ ngx_stream_upstream_check_status_update(ngx_stream_upstream_check_peer_t *peer,
         peer->shm->fall_count++;
         if (!peer->shm->down && peer->shm->fall_count >= ucscf->fall_count) {
             peer->shm->down = 1;
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                          "disable check peer: %V ",
+            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+                          "[ngx-healthcheck][stream][status-update]"
+                          " change status to DOWN for peer: %V ",
                           &peer->check_peer_addr->name);
         }
     }
@@ -1547,23 +1453,26 @@ ngx_stream_upstream_check_timeout_handler(ngx_event_t *event)
 
     peer = event->data;
 
-	if(peer->pc.type == SOCK_STREAM){
-	    peer->pc.connection->error = 1;
-
-	    ngx_log_error(NGX_LOG_ERR, event->log, 0,
-                  "tcp check time out with peer: %V ,set it down.",
-                  &peer->check_peer_addr->name);
-
+    if(peer->pc.type == SOCK_STREAM){
+        peer->pc.connection->error = 1;
+    
+        ngx_log_error(NGX_LOG_ERR, event->log, 0,
+              "[ngx-healthcheck][stream][timers][timeout]"
+              "tcp check time out with peer: %V ,set it down.",
+              &peer->check_peer_addr->name);
+    
         ngx_stream_upstream_check_status_update(peer, 0);
-	}else if(peer->pc.type == SOCK_DGRAM){
-	    peer->pc.connection->error = 0;
-
-	    ngx_log_error(NGX_LOG_INFO, event->log, 0,
-                  "udp check time out with peer: %V, we assum it's up :) ",
-                  &peer->check_peer_addr->name);
-
+    }else if(peer->pc.type == SOCK_DGRAM){
+        peer->pc.connection->error = 0;
+    
+        ngx_log_error(NGX_LOG_INFO, event->log, 0,
+              "[ngx-healthcheck][stream][timers][timeout]"
+              "udp check time out with peer: %V, we assum it's up :) ",
+              &peer->check_peer_addr->name);
+    
         ngx_stream_upstream_check_status_update(peer, 1);
-	}
+    }
+
     ngx_stream_upstream_check_clean_event(peer);
 }
 
@@ -1597,9 +1506,9 @@ ngx_stream_upstream_check_clear_all_events()
     ngx_stream_upstream_check_peer_t  *peer;
     ngx_stream_upstream_check_peers_t *peers;
 
-    static ngx_flag_t                has_cleared = 0; //zhoucx: note! this static var.
+    static ngx_flag_t                has_cleared = 0; // note: this static var.
 
-    if (has_cleared || check_peers_ctx == NULL) {
+    if (has_cleared || stream_peers_ctx == NULL) {
         return;
     }
 
@@ -1608,7 +1517,7 @@ ngx_stream_upstream_check_clear_all_events()
 
     has_cleared = 1;
 
-    peers = check_peers_ctx;
+    peers = stream_peers_ctx;
 
     peer = peers->peers.elts;
     for (i = 0; i < peers->peers.nelts; i++) {
@@ -1927,6 +1836,7 @@ ngx_stream_upstream_check_create_main_conf(ngx_conf_t *cf)
 {
     ngx_stream_upstream_check_main_conf_t  *ucmcf;
 
+
     ucmcf = ngx_pcalloc(cf->pool, sizeof(ngx_stream_upstream_check_main_conf_t));
     if (ucmcf == NULL) {
         return NULL;
@@ -1961,8 +1871,8 @@ ngx_stream_upstream_check_init_main_conf(ngx_conf_t *cf, void *conf)
 
     uscfp = umcf->upstreams.elts;
 
-    ngx_log_error(NGX_LOG_INFO, cf->log, 0,
-                       "init  stream check main conf. stream upstream check, upstreams size:%ui", 
+    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
+                       "[ngx-healthcheck][stream] when init main conf. upstreams num:%ui", 
                        umcf->upstreams.nelts);
     for (i = 0; i < umcf->upstreams.nelts; i++) {
 
@@ -2060,8 +1970,8 @@ ngx_stream_upstream_check_init_shm(ngx_conf_t *cf, void *conf)
     ngx_shm_zone_t                       *shm_zone;
     ngx_stream_upstream_check_main_conf_t  *ucmcf = conf;
 
-    ngx_log_debug1(NGX_LOG_DEBUG_STREAM, cf->log, 0,
-                       "stream upstream check, peers size:%ui", 
+    ngx_log_error(NGX_LOG_INFO, cf->log, 0,
+                       "[ngx-healthcheck][stream][init conf] init shm, total peers num:%ui", 
                        ucmcf->peers->peers.nelts); 
     if (1||(ucmcf->peers->peers.nelts > 0)) {
 
@@ -2081,17 +1991,14 @@ ngx_stream_upstream_check_init_shm(ngx_conf_t *cf, void *conf)
         shm_zone = ngx_shared_memory_add(cf, shm_name, shm_size,
                                          &ngx_stream_upstream_check_module);
 
-        ngx_log_debug2(NGX_LOG_DEBUG_STREAM, cf->log, 0,
-                       "stream upstream check, upsteam:%V, shm_zone size:%ui",
-                       shm_name, shm_size);
 
         shm_zone->data = cf->pool;
-        check_peers_ctx = ucmcf->peers;//zhoucx: init check_peers_ctx obj.
+        stream_peers_ctx = ucmcf->peers; //init global var: stream_peers_ctx obj.
 
         shm_zone->init = ngx_stream_upstream_check_init_shm_zone;
     }
     else {
-        check_peers_ctx = NULL;
+        stream_peers_ctx = NULL;
     }
 
     return NGX_CONF_OK;
@@ -2139,13 +2046,20 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     ngx_str_null(&oshm_name);
 
     same = 0;
-    peers = check_peers_ctx;
+
+
+    ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
+                  "[ngx-healthcheck][stream][shm_zone] init callback");
+
+    peers = stream_peers_ctx;
     if (peers == NULL) {
         return NGX_OK;
     }
 
     number = peers->peers.nelts;
     if (number == 0) {
+        ngx_log_error(NGX_LOG_NOTICE, shm_zone->shm.log, 0,
+                  "[ngx-healthcheck][stream][shm_zone] no peers, so skip alloc peer_shm");
         return NGX_OK;
     }
 
@@ -2157,6 +2071,8 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     shpool = (ngx_slab_pool_t *) shm_zone->shm.addr;
 
     if (data) {
+        ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
+                  "[ngx-healthcheck][stream][shm_zone] found old shm");
         opeers_shm = data;
 
         if ((opeers_shm->number == number)
@@ -2167,7 +2083,9 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
         }
     }
 
-    if (!same) { //zhoucx: upstream config has changed.
+    if (!same) { 
+        ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
+                  "[ngx-healthcheck][stream][shm_zone] upstream data have changed.");
 
         if (ngx_stream_upstream_check_shm_generation > 1) {
 
@@ -2182,16 +2100,16 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
             if (oshm_zone) {
                 opeers_shm = oshm_zone->data;
 
-                ngx_log_debug2(NGX_LOG_DEBUG_STREAM, shm_zone->shm.log, 0,
+                ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
                                "stream upstream check, find oshm_zone:%p, "
                                        "opeers_shm: %p",
                                oshm_zone, opeers_shm);
             }
         }
 
+        // alloc peers_shm
         size = sizeof(*peers_shm) +
                (number - 1) * sizeof(ngx_stream_upstream_check_peer_shm_t);
-
         peers_shm = ngx_slab_alloc(shpool, size);
 
         if (peers_shm == NULL) {

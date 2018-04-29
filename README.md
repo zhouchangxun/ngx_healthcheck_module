@@ -26,29 +26,22 @@ https://github.com/zhouchangxun/ngx_healthcheck_module/blob/master/nginx.conf.ex
 
 # demo output(use example conf above)
 ``` python
-[root@test2 ngx_healthcheck_module]# 
-[root@test2 ngx_healthcheck_module]# curl localhost/status?format=json
+root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# curl localhost/status
 {"servers": {
-  "total": 2,
-  "generation": 1,
-  "server": [
-    {"index": 0, "upstream": "http-cluster", "name": "127.0.0.1:8080", "status": "up", "rise": 7, "fall": 0, "type": "http", "port": 0},
-    {"index": 1, "upstream": "http-cluster", "name": "127.0.0.2:81", "status": "down", "rise": 0, "fall": 7, "type": "http", "port": 0}
-  ]
-}}
-[root@test2 ngx_healthcheck_module]# curl localhost/status/stream?format=json
-{"servers": {
-  "total": 4,
-  "generation": 1,
-  "server": [
-    {"index": 0, "upstream": "tcp-cluster", "name": "127.0.0.1:22", "status": "up", "rise": 9, "fall": 0, "type": "tcp", "port": 0},
-    {"index": 1, "upstream": "tcp-cluster", "name": "192.168.0.2:22", "status": "down", "rise": 0, "fall": 6, "type": "tcp", "port": 0},
-    {"index": 2, "upstream": "udp-cluster", "name": "127.0.0.1:53", "status": "down", "rise": 0, "fall": 10, "type": "udp", "port": 0},
+  "total": 6,
+  "generation": 3,
+  "http": [
+    {"index": 0, "upstream": "http-cluster", "name": "127.0.0.1:8080", "status": "up", "rise": 119, "fall": 0, "type": "http", "port": 0},
+    {"index": 1, "upstream": "http-cluster", "name": "127.0.0.2:81", "status": "down", "rise": 0, "fall": 120, "type": "http", "port": 0}
+  ],
+  "stream": [
+    {"index": 0, "upstream": "tcp-cluster", "name": "127.0.0.1:22", "status": "up", "rise": 22, "fall": 0, "type": "tcp", "port": 0},
+    {"index": 1, "upstream": "tcp-cluster", "name": "192.168.0.2:22", "status": "down", "rise": 0, "fall": 7, "type": "tcp", "port": 0},
+    {"index": 2, "upstream": "udp-cluster", "name": "127.0.0.1:53", "status": "down", "rise": 0, "fall": 120, "type": "udp", "port": 0},
     {"index": 3, "upstream": "udp-cluster", "name": "8.8.8.8:53", "status": "up", "rise": 3, "fall": 0, "type": "udp", "port": 0}
   ]
 }}
-[root@test2 ngx_healthcheck_module]# 
-
+root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# 
 ```
 # directive
 
@@ -119,15 +112,9 @@ Context: http/upstream
 
 所有的后端服务器健康检查状态都存于共享内存中，该指令可以设置共享内存的大小。默认是1M，如果你有1千台以上的服务器并在配置的时候出现了错误，就可能需要扩大该内存的大小。
 
-Syntax: check_status [html|csv|json]
+Syntax: healthcheck_status [html|csv|json]
 
-Default: check_status html
-
-Context: http/server/location
-
-Syntax: l4check_status [html|csv|json]
-
-Default: l4check_status html
+Default: healthcheck_status html
 
 Context: http/server/location
 
