@@ -1,9 +1,9 @@
 # ngx-healthcheck-module 
-
+![loading](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module.svg?branch=master)
 - Health-checker for Nginx upstream servers
 (support http upstream && stream upstream)  
 
-该模块可以为Nginx提供主动式后端服务器健康检查的功能（同时支持四层和七层后端服务器的健康检测）。
+> 该模块可以为Nginx提供主动式后端服务器健康检查的功能（同时支持四层和七层后端服务器的健康检测）。
 
 Table of Contents
 =================
