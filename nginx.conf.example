@@ -12,7 +12,7 @@ http {
         listen 80;
         # status interface
         location /status {
-            healthcheck_status;
+            healthcheck_status json;
         }
         # http front
         location / { 
