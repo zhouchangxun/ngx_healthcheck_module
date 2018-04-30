@@ -1,0 +1,26 @@
+language: c
+compiler:
+  - gcc
+
+os:
+  - linux
+
+dist:
+  - zesty
+
+sudo: true
+
+addons:
+  apt:
+    packages:
+      - libpcre3-dev
+      - zlib1g-dev
+      - openssl
+
+before_install: echo before install addons.
+
+before_script: echo before script.
+
+script: bash ./build.sh
+
+after_success: echo ok!
