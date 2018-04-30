@@ -9,212 +9,86 @@
 #include <ngx_stream.h>
 #include <ngx_http.h>
 
-#include "ngx_stream_upstream_check_module.h"
-
-/* in different c source file, type declare can duplicate. :) */
-
-typedef struct ngx_stream_upstream_check_peer_s ngx_stream_upstream_check_peer_t;
-typedef struct ngx_stream_upstream_check_srv_conf_s ngx_stream_upstream_check_srv_conf_t;
-
-
-typedef struct {
-    ngx_shmtx_t                              mutex;
-#if (nginx_version >= 1002000)
-    ngx_shmtx_sh_t                           lock;
-#else
-    ngx_atomic_t                             lock;
-#endif
-
-    ngx_pid_t                                owner;
-
-    ngx_msec_t                               access_time;
-
-    ngx_uint_t                               fall_count;
-    ngx_uint_t                               rise_count;
-
-    ngx_uint_t                               busyness;
-    ngx_uint_t                               access_count;
-
-    struct sockaddr                         *sockaddr;
-    socklen_t                                socklen;
-
-    ngx_atomic_t                             down;          //current status.
-    ngx_str_t                               *upstream_name;
-    u_char                                   padding[64];
-} ngx_stream_upstream_check_peer_shm_t;
-
-
-typedef struct {
-    ngx_uint_t                               generation; // current process generation(==reload_num +1)
-    ngx_uint_t                               checksum;   // we can know if peer config file changed by calculate it.
-    ngx_uint_t                               number;     // peers total num
-
-    ngx_stream_upstream_check_peer_shm_t       peers[1]; // peers status data array.
-} ngx_stream_upstream_check_peers_shm_t;
-
-
-
-typedef ngx_int_t (*ngx_stream_upstream_check_packet_init_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-typedef ngx_int_t (*ngx_stream_upstream_check_packet_parse_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-typedef void (*ngx_stream_upstream_check_packet_clean_pt)
-        (ngx_stream_upstream_check_peer_t *peer);
-
-struct ngx_stream_upstream_check_peer_s {
-    ngx_flag_t                               state;
-    ngx_pool_t                              *pool;
-    ngx_uint_t                               index;
-    ngx_uint_t                               max_busy;
-    ngx_str_t                               *upstream_name;
-    ngx_addr_t                              *check_peer_addr;
-    ngx_addr_t                              *peer_addr;
-    ngx_event_t                              check_ev;
-    ngx_event_t                              check_timeout_ev;
-    ngx_peer_connection_t                    pc;
-
-    void                                    *check_data;
-    ngx_event_handler_pt                     send_handler;
-    ngx_event_handler_pt                     recv_handler;
-
-    ngx_stream_upstream_check_packet_init_pt   init; //zhoucx: function ptr
-    ngx_stream_upstream_check_packet_parse_pt  parse;
-    ngx_stream_upstream_check_packet_clean_pt  reinit;
-
-    ngx_stream_upstream_check_peer_shm_t      *shm;
-    ngx_stream_upstream_check_srv_conf_t      *conf;
-};
-
-
-typedef struct {
-    ngx_str_t                                check_shm_name;
-    ngx_uint_t                               checksum;
-    ngx_array_t                              peers;
-
-    ngx_stream_upstream_check_peers_shm_t     *peers_shm;
-} ngx_stream_upstream_check_peers_t;
-
-
-typedef struct {
-    ngx_uint_t                               type;
-
-    ngx_str_t                                name;
-
-    ngx_str_t                                default_send;
-
-    /* HTTP */
-    ngx_uint_t                               default_status_alive;
-
-    ngx_event_handler_pt                     send_handler;
-    ngx_event_handler_pt                     recv_handler;
-
-    ngx_stream_upstream_check_packet_init_pt   init;
-    ngx_stream_upstream_check_packet_parse_pt  parse;
-    ngx_stream_upstream_check_packet_clean_pt  reinit;
-
-    unsigned need_pool;
-    unsigned need_keepalive;
-} ngx_check_conf_t;
-
-
-typedef void (*ngx_stream_upstream_check_status_format_pt) (ngx_buf_t *b,
-                                                            ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag);
-
-typedef struct {
-    ngx_str_t                                format;
-    ngx_str_t                                content_type;
-
-    ngx_stream_upstream_check_status_format_pt output;
-} ngx_check_status_conf_t;
+#include "common.h.in"
 
 
 #define NGX_CHECK_STATUS_DOWN                0x0001
 #define NGX_CHECK_STATUS_UP                  0x0002
 
+typedef void (*ngx_upstream_check_status_format_pt) (ngx_buf_t *b,
+                                                     ngx_upstream_check_peers_t *peers,
+                                                     ngx_uint_t flag);
+typedef struct {
+    ngx_str_t                                format;
+    ngx_str_t                                content_type;
+
+    ngx_upstream_check_status_format_pt output;
+} ngx_check_status_conf_t;
+
 typedef struct {
     ngx_check_status_conf_t                 *format;
     ngx_flag_t                               flag;
-} ngx_stream_upstream_check_status_ctx_t;
+} ngx_upstream_check_status_ctx_t;
 
 
-typedef ngx_int_t (*ngx_stream_upstream_check_status_command_pt)
-        (ngx_stream_upstream_check_status_ctx_t *ctx, ngx_str_t *value);
+typedef ngx_int_t (*ngx_upstream_check_status_command_pt)
+        (ngx_upstream_check_status_ctx_t *ctx, ngx_str_t *value);
 
 typedef struct {
     ngx_str_t                                 name;
-    ngx_stream_upstream_check_status_command_pt handler;
+    ngx_upstream_check_status_command_pt      handler;
 } ngx_check_status_command_t;
 
-//zhocux stream check module main config data.
+// check module main config data.
 typedef struct {
-    ngx_uint_t                               check_shm_size;
-    ngx_stream_upstream_check_peers_t         *peers;
-} ngx_stream_upstream_check_main_conf_t;
-
-
-struct ngx_stream_upstream_check_srv_conf_s {
-    ngx_uint_t                               port;
-    ngx_uint_t                               fall_count;
-    ngx_uint_t                               rise_count;
-    ngx_msec_t                               check_interval;
-    ngx_msec_t                               check_timeout;
-    ngx_uint_t                               check_keepalive_requests;
-
-    ngx_check_conf_t                        *check_type_conf;
-    ngx_str_t                                send;
-
-    union {
-        ngx_uint_t                           return_code;
-        ngx_uint_t                           status_alive;
-    } code;
-
-    ngx_uint_t                               default_down;
-};
+    ngx_uint_t                          check_shm_size;
+    ngx_upstream_check_peers_t         *peers;
+} ngx_upstream_check_main_conf_t;
 
 
 typedef struct {
     ngx_check_status_conf_t                 *format;
-} ngx_stream_upstream_check_loc_conf_t;
+} ngx_upstream_check_loc_conf_t;
 
 
 // external var declare
   extern ngx_uint_t ngx_stream_upstream_check_shm_generation ; //reload counter
-  extern ngx_stream_upstream_check_peers_t *stream_peers_ctx ;  //stream peers data
-  extern ngx_stream_upstream_check_peers_t *http_peers_ctx ; // http peers data
+  extern ngx_upstream_check_peers_t *stream_peers_ctx ;  //stream peers data
+  extern ngx_upstream_check_peers_t *http_peers_ctx ; // http peers data
 
 
 //begin check_status function declare
-static ngx_int_t ngx_stream_upstream_check_status_handler(
+static ngx_int_t ngx_upstream_check_status_handler(
     ngx_http_request_t *r); 
-static void ngx_stream_upstream_check_status_parse_args(ngx_http_request_t *r,
-    ngx_stream_upstream_check_status_ctx_t *ctx);
+static void ngx_upstream_check_status_parse_args(ngx_http_request_t *r,
+    ngx_upstream_check_status_ctx_t *ctx);
 
-static ngx_int_t ngx_stream_upstream_check_status_command_format(
-    ngx_stream_upstream_check_status_ctx_t *ctx, ngx_str_t *value);
-static ngx_int_t ngx_stream_upstream_check_status_command_status(
-    ngx_stream_upstream_check_status_ctx_t *ctx, ngx_str_t *value);
+static ngx_int_t ngx_upstream_check_status_command_format(
+    ngx_upstream_check_status_ctx_t *ctx, ngx_str_t *value);
+static ngx_int_t ngx_upstream_check_status_command_status(
+    ngx_upstream_check_status_ctx_t *ctx, ngx_str_t *value);
 
-static void ngx_stream_upstream_check_status_html_format(ngx_buf_t *b,
-    ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag);
-static void ngx_stream_upstream_check_status_csv_format(ngx_buf_t *b,
-    ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag);
-static void ngx_stream_upstream_check_status_json_format(ngx_buf_t *b,
-    ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag);
+static void ngx_upstream_check_status_html_format(ngx_buf_t *b,
+    ngx_upstream_check_peers_t *peers, ngx_uint_t flag);
+static void ngx_upstream_check_status_csv_format(ngx_buf_t *b,
+    ngx_upstream_check_peers_t *peers, ngx_uint_t flag);
+static void ngx_upstream_check_status_json_format(ngx_buf_t *b,
+    ngx_upstream_check_peers_t *peers, ngx_uint_t flag);
 static ngx_check_status_conf_t *ngx_http_get_check_status_format_conf(
     ngx_str_t *str);
 
-static char *ngx_stream_upstream_check_status(ngx_conf_t *cf, 
+static char *ngx_upstream_check_status(ngx_conf_t *cf, 
     ngx_command_t *cmd, void *conf);
-static void *ngx_stream_upstream_check_create_loc_conf(ngx_conf_t *cf);
-static char * ngx_stream_upstream_check_merge_loc_conf(ngx_conf_t *cf, 
+static void *ngx_upstream_check_create_loc_conf(ngx_conf_t *cf);
+static char * ngx_upstream_check_merge_loc_conf(ngx_conf_t *cf, 
     void *parent, void *child);
 //end check_status function declare
 
 //1 cmd define
-static ngx_command_t  ngx_stream_upstream_check_status_commands[] = {
+static ngx_command_t  ngx_upstream_check_status_commands[] = {
     { ngx_string("healthcheck_status"),
       NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1|NGX_CONF_NOARGS,
-      ngx_stream_upstream_check_status,
+      ngx_upstream_check_status,
       0,
       0,
       NULL },
@@ -222,7 +96,7 @@ static ngx_command_t  ngx_stream_upstream_check_status_commands[] = {
       ngx_null_command
 };
 //2 ctx define
-static ngx_http_module_t  ngx_stream_upstream_check_status_module_ctx = {
+static ngx_http_module_t  ngx_upstream_check_status_module_ctx = {
         NULL,                                    /* preconfiguration */
         NULL,                                    /* postconfiguration */
 
@@ -232,14 +106,14 @@ static ngx_http_module_t  ngx_stream_upstream_check_status_module_ctx = {
         NULL,                                    /* create server configuration */
         NULL,                                    /* merge server configuration */
 
-        ngx_stream_upstream_check_create_loc_conf, /* create location configuration */
-        ngx_stream_upstream_check_merge_loc_conf   /* merge location configuration */
+        ngx_upstream_check_create_loc_conf, /* create location configuration */
+        ngx_upstream_check_merge_loc_conf   /* merge location configuration */
 };
 //3 module define
-ngx_module_t  ngx_stream_upstream_check_status_module = {
+ngx_module_t  ngx_upstream_check_status_module = {
         NGX_MODULE_V1,
-        &ngx_stream_upstream_check_status_module_ctx,   /* module context */
-        ngx_stream_upstream_check_status_commands,      /* module directives */
+        &ngx_upstream_check_status_module_ctx,   /* module context */
+        ngx_upstream_check_status_commands,      /* module directives */
         NGX_HTTP_MODULE,                       /* module type */
         NULL,                                  /* init master */
         NULL,                                  /* init module */
@@ -252,21 +126,21 @@ ngx_module_t  ngx_stream_upstream_check_status_module = {
 };
 //health checker cmd callback.
 static char *
-ngx_stream_upstream_check_status(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_upstream_check_status(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_str_t                           *value;
     ngx_http_core_loc_conf_t            *clcf;
-    ngx_stream_upstream_check_loc_conf_t  *uclcf;
+    ngx_upstream_check_loc_conf_t  *uclcf;
 
     value = cf->args->elts;
 
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
 
-    clcf->handler = ngx_stream_upstream_check_status_handler;
+    clcf->handler = ngx_upstream_check_status_handler;
 
     if (cf->args->nelts == 2) {
         uclcf = ngx_http_conf_get_module_loc_conf(cf,
-                                              ngx_stream_upstream_check_status_module);
+                                              ngx_upstream_check_status_module);
 
         uclcf->format = ngx_http_get_check_status_format_conf(&value[1]);
         if (uclcf->format == NULL) {
@@ -281,11 +155,11 @@ ngx_stream_upstream_check_status(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 // location config  callback
 static void *
-ngx_stream_upstream_check_create_loc_conf(ngx_conf_t *cf)
+ngx_upstream_check_create_loc_conf(ngx_conf_t *cf)
 {
-    ngx_stream_upstream_check_loc_conf_t  *uclcf;
+    ngx_upstream_check_loc_conf_t  *uclcf;
 
-    uclcf = ngx_pcalloc(cf->pool, sizeof(ngx_stream_upstream_check_loc_conf_t));
+    uclcf = ngx_pcalloc(cf->pool, sizeof(ngx_upstream_check_loc_conf_t));
     if (uclcf == NULL) {
         return NULL;
     }
@@ -296,32 +170,32 @@ ngx_stream_upstream_check_create_loc_conf(ngx_conf_t *cf)
 }
 
 static char *
-ngx_stream_upstream_check_merge_loc_conf(ngx_conf_t *cf, void *parent,
+ngx_upstream_check_merge_loc_conf(ngx_conf_t *cf, void *parent,
     void *child)
 {
     ngx_str_t                            format = ngx_string("html");
-    ngx_stream_upstream_check_loc_conf_t  *prev = parent;
-    ngx_stream_upstream_check_loc_conf_t  *conf = child;
+    ngx_upstream_check_loc_conf_t  *prev = parent;
+    ngx_upstream_check_loc_conf_t  *conf = child;
 
     ngx_conf_merge_ptr_value(conf->format, prev->format,
                              ngx_http_get_check_status_format_conf(&format));
 
     return NGX_CONF_OK;
 }
-// internal function define
+
 static ngx_check_status_conf_t  ngx_check_status_formats[] = {
 
     { ngx_string("html"),
       ngx_string("text/html"),
-      ngx_stream_upstream_check_status_html_format },
+      ngx_upstream_check_status_html_format },
 
     { ngx_string("csv"),
       ngx_string("text/plain"),
-      ngx_stream_upstream_check_status_csv_format },
+      ngx_upstream_check_status_csv_format },
 
     { ngx_string("json"),
       ngx_string("application/json"), // RFC 4627
-      ngx_stream_upstream_check_status_json_format },
+      ngx_upstream_check_status_json_format },
 
     { ngx_null_string, ngx_null_string, NULL }
 };
@@ -329,25 +203,25 @@ static ngx_check_status_conf_t  ngx_check_status_formats[] = {
 static ngx_check_status_command_t ngx_check_status_commands[] =  {
 
     { ngx_string("format"),
-      ngx_stream_upstream_check_status_command_format },
+      ngx_upstream_check_status_command_format },
 
     { ngx_string("status"),
-      ngx_stream_upstream_check_status_command_status },
+      ngx_upstream_check_status_command_status },
 
     { ngx_null_string, NULL }
 };
 
-/* http request hander. */
+/* http request handler. */
 static ngx_int_t
-ngx_stream_upstream_check_status_handler(ngx_http_request_t *r)
+ngx_upstream_check_status_handler(ngx_http_request_t *r)
 {
     size_t                                 buffer_size;
     ngx_int_t                              rc;
     ngx_buf_t                             *b;
     ngx_chain_t                            out;
-    ngx_stream_upstream_check_peers_t       *peers;
-    ngx_stream_upstream_check_loc_conf_t    *uclcf;
-    ngx_stream_upstream_check_status_ctx_t  *ctx;
+    ngx_upstream_check_peers_t       *peers;
+    ngx_upstream_check_loc_conf_t    *uclcf;
+    ngx_upstream_check_status_ctx_t  *ctx;
 
     ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                  "[ngx-healthcheck][status-interface] recv query request");
@@ -362,14 +236,14 @@ ngx_stream_upstream_check_status_handler(ngx_http_request_t *r)
         return rc;
     }
 
-    uclcf = ngx_http_get_module_loc_conf(r, ngx_stream_upstream_check_status_module);
+    uclcf = ngx_http_get_module_loc_conf(r, ngx_upstream_check_status_module);
 
-    ctx = ngx_pcalloc(r->pool, sizeof(ngx_stream_upstream_check_status_ctx_t));
+    ctx = ngx_pcalloc(r->pool, sizeof(ngx_upstream_check_status_ctx_t));
     if (ctx == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    ngx_stream_upstream_check_status_parse_args(r, ctx);
+    ngx_upstream_check_status_parse_args(r, ctx);
 
     if (ctx->format == NULL) {
         ctx->format = uclcf->format;
@@ -432,8 +306,8 @@ ngx_stream_upstream_check_status_handler(ngx_http_request_t *r)
 }
 
 static void
-ngx_stream_upstream_check_status_parse_args(ngx_http_request_t *r,
-    ngx_stream_upstream_check_status_ctx_t *ctx)
+ngx_upstream_check_status_parse_args(ngx_http_request_t *r,
+    ngx_upstream_check_status_ctx_t *ctx)
 {
     ngx_str_t                    value;
     ngx_uint_t                   i;
@@ -468,8 +342,8 @@ ngx_stream_upstream_check_status_parse_args(ngx_http_request_t *r,
 
 
 static ngx_int_t
-ngx_stream_upstream_check_status_command_format(
-    ngx_stream_upstream_check_status_ctx_t *ctx, ngx_str_t *value)
+ngx_upstream_check_status_command_format(
+    ngx_upstream_check_status_ctx_t *ctx, ngx_str_t *value)
 {
     ctx->format = ngx_http_get_check_status_format_conf(value);
     if (ctx->format == NULL) {
@@ -481,8 +355,8 @@ ngx_stream_upstream_check_status_command_format(
 
 
 static ngx_int_t
-ngx_stream_upstream_check_status_command_status(
-    ngx_stream_upstream_check_status_ctx_t *ctx, ngx_str_t *value)
+ngx_upstream_check_status_command_status(
+    ngx_upstream_check_status_ctx_t *ctx, ngx_str_t *value)
 {
     if (value->len == (sizeof("down") - 1)
         && ngx_strncasecmp(value->data, (u_char *) "down", value->len) == 0) {
@@ -503,11 +377,11 @@ ngx_stream_upstream_check_status_command_status(
 }
 
 static void
-ngx_stream_upstream_check_status_html_format(ngx_buf_t *b,
-    ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag)
+ngx_upstream_check_status_html_format(ngx_buf_t *b,
+    ngx_upstream_check_peers_t *peers, ngx_uint_t flag)
 {
     ngx_uint_t                      i, count;
-    ngx_stream_upstream_check_peer_t *peer;
+    ngx_upstream_check_peer_t *peer;
 
     peer = peers->peers.elts;
 
@@ -600,11 +474,11 @@ ngx_stream_upstream_check_status_html_format(ngx_buf_t *b,
 
 
 static void
-ngx_stream_upstream_check_status_csv_format(ngx_buf_t *b,
-    ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag)
+ngx_upstream_check_status_csv_format(ngx_buf_t *b,
+    ngx_upstream_check_peers_t *peers, ngx_uint_t flag)
 {
     ngx_uint_t                       i;
-    ngx_stream_upstream_check_peer_t  *peer;
+    ngx_upstream_check_peer_t  *peer;
 
     peer = peers->peers.elts;
     for (i = 0; i < peers->peers.nelts; i++) {
@@ -637,11 +511,11 @@ ngx_stream_upstream_check_status_csv_format(ngx_buf_t *b,
 
 
 static void
-ngx_stream_upstream_check_status_json_format(ngx_buf_t *b,
-    ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag)
+ngx_upstream_check_status_json_format(ngx_buf_t *b,
+    ngx_upstream_check_peers_t *peers, ngx_uint_t flag)
 {
     ngx_uint_t                       count, i, last;
-    ngx_stream_upstream_check_peer_t  *peer;
+    ngx_upstream_check_peer_t  *peer;
 
 
     /* calc display total num after filter param*/

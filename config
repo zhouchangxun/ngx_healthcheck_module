@@ -8,14 +8,16 @@ ngx_feature_src="$ngx_addon_dir/ngx_http_upstream_check_module.c \
                  $ngx_addon_dir/ngx_stream_upstream_check_module.c \
                  $ngx_addon_dir/ngx_healthcheck_status.c "
 
+
 have=NGX_STREAM_UPSTREAM_CHECK . auto/have
 have=NGX_HTTP_UPSTREAM_CHECK . auto/have
 
 if [ "$ngx_module_link" = DYNAMIC ]; then
-
+  echo "[ERROR] ngx_healthcheck_module do not support dynamic loading yet.";exit 1
   #first module name as main module name.
-  ngx_module_name="ngx_stream_upstream_check_module ngx_http_upstream_check_module \
-                   ngx_upstream_check_status_module "
+  ngx_module_name="ngx_upstream_check_status_module \
+                   ngx_stream_upstream_check_module \
+                   ngx_http_upstream_check_module "
   ngx_module_incs="$ngx_feature_path"
   ngx_module_srcs="$ngx_feature_src"
   ngx_module_deps="$ngx_feature_deps"
@@ -25,7 +27,7 @@ if [ "$ngx_module_link" = DYNAMIC ]; then
 else
   STREAM_MODULES="$STREAM_MODULES ngx_stream_upstream_check_module"
   HTTP_MODULES="$HTTP_MODULES ngx_http_upstream_check_module"
-  HTTP_MODULES="$HTTP_MODULES ngx_stream_upstream_check_status_module"
+  HTTP_MODULES="$HTTP_MODULES ngx_upstream_check_status_module"
   CORE_INCS="$CORE_INCS $ngx_feature_path"
   NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_feature_deps"
   NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_feature_src"
