@@ -44,7 +44,7 @@ typedef struct {
 #define NGX_CHECK_HTTP_ERR                   0x8000
 
 typedef void (*ngx_stream_upstream_check_status_format_pt) (ngx_buf_t *b,
-                                                            ngx_stream_upstream_check_peers_t *peers, ngx_uint_t flag);
+                                                            ngx_upstream_check_peers_t *peers, ngx_uint_t flag);
 
 typedef struct {
     ngx_str_t                                format;
@@ -74,7 +74,7 @@ typedef struct {
 //zhocux stream check module main config data.
 typedef struct {
     ngx_uint_t                               check_shm_size;
-    ngx_stream_upstream_check_peers_t         *peers;
+    ngx_upstream_check_peers_t         *peers;
 } ngx_stream_upstream_check_main_conf_t;
 
 
@@ -101,22 +101,22 @@ static void ngx_stream_upstream_check_discard_handler(ngx_event_t *event);
 static void ngx_stream_upstream_check_dummy_handler(ngx_event_t *event);
 
 static ngx_int_t ngx_stream_upstream_check_http_init(
-        ngx_stream_upstream_check_peer_t *peer);
+        ngx_upstream_check_peer_t *peer);
 static ngx_int_t ngx_stream_upstream_check_http_parse(
-        ngx_stream_upstream_check_peer_t *peer);
+        ngx_upstream_check_peer_t *peer);
 static ngx_int_t ngx_stream_upstream_check_parse_status_line(
         ngx_stream_upstream_check_ctx_t *ctx, ngx_buf_t *b,
         ngx_http_status_t *status);
 static void ngx_stream_upstream_check_http_reinit(
-        ngx_stream_upstream_check_peer_t *peer);
+        ngx_upstream_check_peer_t *peer);
 
 
 static void ngx_stream_upstream_check_status_update(
-        ngx_stream_upstream_check_peer_t *peer,
+        ngx_upstream_check_peer_t *peer,
         ngx_int_t result);
 
 static void ngx_stream_upstream_check_clean_event(
-        ngx_stream_upstream_check_peer_t *peer);
+        ngx_upstream_check_peer_t *peer);
 
 static void ngx_stream_upstream_check_timeout_handler(ngx_event_t *event);
 static void ngx_stream_upstream_check_finish_handler(ngx_event_t *event);
@@ -157,13 +157,13 @@ static ngx_int_t ngx_stream_upstream_check_get_shm_name(ngx_str_t *shm_name,
                                                         ngx_pool_t *pool, ngx_uint_t generation);
 static ngx_shm_zone_t *ngx_shared_memory_find(ngx_cycle_t *cycle,
                                               ngx_str_t *name, void *tag);
-static ngx_stream_upstream_check_peer_shm_t *
-ngx_stream_upstream_check_find_shm_peer(ngx_stream_upstream_check_peers_shm_t *peers_shm,
+static ngx_upstream_check_peer_shm_t *
+ngx_stream_upstream_check_find_shm_peer(ngx_upstream_check_peers_shm_t *peers_shm,
                                         ngx_addr_t *addr, ngx_str_t *upstream_name);
 
 static ngx_int_t ngx_stream_upstream_check_init_shm_peer(
-        ngx_stream_upstream_check_peer_shm_t *peer_shm,
-        ngx_stream_upstream_check_peer_shm_t *opeer_shm,
+        ngx_upstream_check_peer_shm_t *peer_shm,
+        ngx_upstream_check_peer_shm_t *opeer_shm,
         ngx_uint_t init_down, ngx_pool_t *pool, ngx_str_t *peer_name, ngx_str_t *upstream_name);
 
 static ngx_int_t ngx_stream_upstream_check_init_shm_zone(
@@ -305,16 +305,16 @@ static ngx_check_conf_t  ngx_check_types[] = {
 
 /* external glabal var*/
  ngx_uint_t ngx_stream_upstream_check_shm_generation = 0; //reload counter
- ngx_stream_upstream_check_peers_t *stream_peers_ctx = NULL; //need by check status module
+ ngx_upstream_check_peers_t *stream_peers_ctx = NULL; //need by check status module
 
 
 ngx_uint_t
 ngx_stream_upstream_check_add_peer(ngx_conf_t *cf,
                                    ngx_stream_upstream_srv_conf_t *us, ngx_addr_t *peer_addr)
 {
-    ngx_stream_upstream_check_peer_t       *peer;
-    ngx_stream_upstream_check_peers_t      *peers;
-    ngx_stream_upstream_check_srv_conf_t   *ucscf;
+    ngx_upstream_check_peer_t       *peer;
+    ngx_upstream_check_peers_t      *peers;
+    ngx_upstream_check_srv_conf_t   *ucscf;
     ngx_stream_upstream_check_main_conf_t  *ucmcf;
 
     ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
@@ -340,7 +340,7 @@ ngx_stream_upstream_check_add_peer(ngx_conf_t *cf,
         return NGX_ERROR;
     }
 
-    ngx_memzero(peer, sizeof(ngx_stream_upstream_check_peer_t));
+    ngx_memzero(peer, sizeof(ngx_upstream_check_peer_t));
 
     peer->index = peers->peers.nelts - 1;
     peer->conf = ucscf;
@@ -435,7 +435,7 @@ ngx_stream_upstream_check_addr_change_port(ngx_pool_t *pool, ngx_addr_t *dst,
 ngx_uint_t
 ngx_stream_upstream_check_peer_down(ngx_uint_t index)
 {
-    ngx_stream_upstream_check_peer_t  *peer;
+    ngx_upstream_check_peer_t  *peer;
 
     if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return 0;
@@ -451,7 +451,7 @@ ngx_stream_upstream_check_peer_down(ngx_uint_t index)
 void
 ngx_stream_upstream_check_get_peer(ngx_uint_t index)
 {
-    ngx_stream_upstream_check_peer_t  *peer;
+    ngx_upstream_check_peer_t  *peer;
 
     if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return;
@@ -471,7 +471,7 @@ ngx_stream_upstream_check_get_peer(ngx_uint_t index)
 void
 ngx_stream_upstream_check_free_peer(ngx_uint_t index)
 {
-    ngx_stream_upstream_check_peer_t  *peer;
+    ngx_upstream_check_peer_t  *peer;
 
     if (stream_peers_ctx == NULL || index >= stream_peers_ctx->peers.nelts) {
         return;
@@ -495,11 +495,11 @@ ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle)
     ngx_uint_t                           i;
     ngx_msec_t                           t, delay;
     ngx_check_conf_t                    *cf;
-    ngx_stream_upstream_check_peer_t      *peer;
-    ngx_stream_upstream_check_peers_t     *peers;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
-    ngx_stream_upstream_check_peer_shm_t  *peer_shm;
-    ngx_stream_upstream_check_peers_shm_t *peers_shm;
+    ngx_upstream_check_peer_t      *peer;
+    ngx_upstream_check_peers_t     *peers;
+    ngx_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_peer_shm_t  *peer_shm;
+    ngx_upstream_check_peers_shm_t *peers_shm;
 
     peers = stream_peers_ctx;
     if (peers == NULL) {
@@ -577,10 +577,10 @@ static void
 ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
 {
     ngx_msec_t                           interval;
-    ngx_stream_upstream_check_peer_t      *peer;
-    ngx_stream_upstream_check_peers_t     *peers;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
-    ngx_stream_upstream_check_peers_shm_t *peers_shm;
+    ngx_upstream_check_peer_t      *peer;
+    ngx_upstream_check_peers_t     *peers;
+    ngx_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_peers_shm_t *peers_shm;
 
 
     peers = stream_peers_ctx;
@@ -663,8 +663,8 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
 {
     ngx_int_t                            rc;
     ngx_connection_t                    *c;
-    ngx_stream_upstream_check_peer_t      *peer;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_peer_t      *peer;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
     peer = event->data;
     ucscf = peer->conf;
@@ -764,7 +764,7 @@ static void
 ngx_stream_upstream_check_peek_handler(ngx_event_t *event)
 {
     ngx_connection_t               *c;
-    ngx_stream_upstream_check_peer_t *peer;
+    ngx_upstream_check_peer_t *peer;
 
     if (ngx_stream_upstream_check_need_exit()) {
         return;
@@ -793,7 +793,7 @@ ngx_stream_upstream_check_discard_handler(ngx_event_t *event)
     u_char                          buf[4096];
     ssize_t                         size;
     ngx_connection_t               *c;
-    ngx_stream_upstream_check_peer_t *peer;
+    ngx_upstream_check_peer_t *peer;
 
     c = event->data;
 
@@ -850,7 +850,7 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
     ssize_t                         size;
     ngx_connection_t               *c;
     ngx_stream_upstream_check_ctx_t  *ctx;
-    ngx_stream_upstream_check_peer_t *peer;
+    ngx_upstream_check_peer_t *peer;
 
     if (ngx_stream_upstream_check_need_exit()) {
         return;
@@ -952,7 +952,7 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
     ngx_int_t                       rc;
     ngx_connection_t               *c;
     ngx_stream_upstream_check_ctx_t  *ctx;
-    ngx_stream_upstream_check_peer_t *peer;
+    ngx_upstream_check_peer_t *peer;
 
     if (ngx_stream_upstream_check_need_exit()) {
         return;
@@ -1073,10 +1073,10 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
 
 
 static ngx_int_t
-ngx_stream_upstream_check_http_init(ngx_stream_upstream_check_peer_t *peer)
+ngx_stream_upstream_check_http_init(ngx_upstream_check_peer_t *peer)
 {
     ngx_stream_upstream_check_ctx_t       *ctx;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
     ctx = peer->check_data;
     ucscf = peer->conf;
@@ -1096,12 +1096,12 @@ ngx_stream_upstream_check_http_init(ngx_stream_upstream_check_peer_t *peer)
 
 
 static ngx_int_t
-ngx_stream_upstream_check_http_parse(ngx_stream_upstream_check_peer_t *peer)
+ngx_stream_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
 {
     ngx_int_t                            rc;
     ngx_uint_t                           code, code_n;
     ngx_stream_upstream_check_ctx_t       *ctx;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
     ucscf = peer->conf;
     ctx = peer->check_data;
@@ -1350,7 +1350,7 @@ ngx_stream_upstream_check_parse_status_line(ngx_stream_upstream_check_ctx_t *ctx
 
 
 static void
-ngx_stream_upstream_check_http_reinit(ngx_stream_upstream_check_peer_t *peer)
+ngx_stream_upstream_check_http_reinit(ngx_upstream_check_peer_t *peer)
 {
     ngx_stream_upstream_check_ctx_t  *ctx;
 
@@ -1368,10 +1368,10 @@ ngx_stream_upstream_check_http_reinit(ngx_stream_upstream_check_peer_t *peer)
 
 
 static void
-ngx_stream_upstream_check_status_update(ngx_stream_upstream_check_peer_t *peer,
+ngx_stream_upstream_check_status_update(ngx_upstream_check_peer_t *peer,
                                         ngx_int_t result)
 {
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
     ucscf = peer->conf;
 
@@ -1402,10 +1402,10 @@ ngx_stream_upstream_check_status_update(ngx_stream_upstream_check_peer_t *peer,
 
 
 static void
-ngx_stream_upstream_check_clean_event(ngx_stream_upstream_check_peer_t *peer)
+ngx_stream_upstream_check_clean_event(ngx_upstream_check_peer_t *peer)
 {
     ngx_connection_t                    *c;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
     ngx_check_conf_t                    *cf;
 
     c = peer->pc.connection;
@@ -1445,7 +1445,7 @@ ngx_stream_upstream_check_clean_event(ngx_stream_upstream_check_peer_t *peer)
 static void
 ngx_stream_upstream_check_timeout_handler(ngx_event_t *event)
 {
-    ngx_stream_upstream_check_peer_t  *peer;
+    ngx_upstream_check_peer_t  *peer;
 
     if (ngx_stream_upstream_check_need_exit()) {
         return;
@@ -1503,8 +1503,8 @@ ngx_stream_upstream_check_clear_all_events()
 {
     ngx_uint_t                       i;
     ngx_connection_t                *c;
-    ngx_stream_upstream_check_peer_t  *peer;
-    ngx_stream_upstream_check_peers_t *peers;
+    ngx_upstream_check_peer_t  *peer;
+    ngx_upstream_check_peers_t *peers;
 
     static ngx_flag_t                has_cleared = 0; // note: this static var.
 
@@ -1575,7 +1575,7 @@ ngx_stream_upstream_check(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_str_t                           *value, s;
     ngx_uint_t                           i, port, rise, fall, default_down;
     ngx_msec_t                           interval, timeout;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
     /* default values */
     port = 0;
@@ -1718,7 +1718,7 @@ ngx_stream_upstream_check_keepalive_requests(ngx_conf_t *cf, ngx_command_t *cmd,
                                              void *conf)
 {
     ngx_str_t                           *value;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
     ngx_uint_t                           requests;
 
     value = cf->args->elts;
@@ -1742,7 +1742,7 @@ ngx_stream_upstream_check_http_send(ngx_conf_t *cf, ngx_command_t *cmd,
                                     void *conf)
 {
     ngx_str_t                           *value;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
     value = cf->args->elts;
 
@@ -1765,7 +1765,7 @@ ngx_stream_upstream_check_http_expect_alive(ngx_conf_t *cf, ngx_command_t *cmd,
     ngx_str_t                           *value;
     ngx_uint_t                           bit, i, m;
     ngx_conf_bitmask_t                  *mask;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
     value = cf->args->elts;
     mask = ngx_check_http_expect_alive_masks;
@@ -1843,7 +1843,7 @@ ngx_stream_upstream_check_create_main_conf(ngx_conf_t *cf)
     }
 
     ucmcf->peers = ngx_pcalloc(cf->pool,
-                               sizeof(ngx_stream_upstream_check_peers_t));
+                               sizeof(ngx_upstream_check_peers_t));
     if (ucmcf->peers == NULL) {
         return NULL;
     }
@@ -1851,7 +1851,7 @@ ngx_stream_upstream_check_create_main_conf(ngx_conf_t *cf)
     ucmcf->peers->checksum = 0;
 
     if (ngx_array_init(&ucmcf->peers->peers, cf->pool, 16,
-                       sizeof(ngx_stream_upstream_check_peer_t)) != NGX_OK)
+                       sizeof(ngx_upstream_check_peer_t)) != NGX_OK)
     {
         return NULL;
     }
@@ -1888,9 +1888,9 @@ ngx_stream_upstream_check_init_main_conf(ngx_conf_t *cf, void *conf)
 static void *
 ngx_stream_upstream_check_create_srv_conf(ngx_conf_t *cf)
 {
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_srv_conf_t  *ucscf;
 
-    ucscf = ngx_pcalloc(cf->pool, sizeof(ngx_stream_upstream_check_srv_conf_t));
+    ucscf = ngx_pcalloc(cf->pool, sizeof(ngx_upstream_check_srv_conf_t));
     if (ucscf == NULL) {
         return NULL;
     }
@@ -1910,7 +1910,7 @@ ngx_stream_upstream_check_init_srv_conf(ngx_conf_t *cf, void *conf)
 {
     ngx_check_conf_t                   *check;
     ngx_stream_upstream_srv_conf_t       *us = conf;
-    ngx_stream_upstream_check_srv_conf_t *ucscf;
+    ngx_upstream_check_srv_conf_t *ucscf;
 
     if (us->srv_conf == NULL) {
         return NGX_CONF_OK;
@@ -2035,11 +2035,11 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     ngx_pool_t                          *pool;
     ngx_shm_zone_t                      *oshm_zone;
     ngx_slab_pool_t                     *shpool;
-    ngx_stream_upstream_check_peer_t      *peer;
-    ngx_stream_upstream_check_peers_t     *peers;
-    ngx_stream_upstream_check_srv_conf_t  *ucscf;
-    ngx_stream_upstream_check_peer_shm_t  *peer_shm, *opeer_shm;
-    ngx_stream_upstream_check_peers_shm_t *peers_shm, *opeers_shm;
+    ngx_upstream_check_peer_t      *peer;
+    ngx_upstream_check_peers_t     *peers;
+    ngx_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_peer_shm_t  *peer_shm, *opeer_shm;
+    ngx_upstream_check_peers_shm_t *peers_shm, *opeers_shm;
 
     opeers_shm = NULL;
     peers_shm = NULL;
@@ -2109,7 +2109,7 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
 
         // alloc peers_shm
         size = sizeof(*peers_shm) +
-               (number - 1) * sizeof(ngx_stream_upstream_check_peer_shm_t);
+               (number - 1) * sizeof(ngx_upstream_check_peer_shm_t);
         peers_shm = ngx_slab_alloc(shpool, size);
 
         if (peers_shm == NULL) {
@@ -2231,12 +2231,12 @@ ngx_shared_memory_find(ngx_cycle_t *cycle, ngx_str_t *name, void *tag)
 }
 
 
-static ngx_stream_upstream_check_peer_shm_t *
-ngx_stream_upstream_check_find_shm_peer(ngx_stream_upstream_check_peers_shm_t *p,
+static ngx_upstream_check_peer_shm_t *
+ngx_stream_upstream_check_find_shm_peer(ngx_upstream_check_peers_shm_t *p,
                                         ngx_addr_t *addr, ngx_str_t *upstream_name)
 {
     ngx_uint_t                          i;
-    ngx_stream_upstream_check_peer_shm_t *peer_shm;
+    ngx_upstream_check_peer_shm_t *peer_shm;
 
     for (i = 0; i < p->number; i++) {
 
@@ -2260,8 +2260,8 @@ ngx_stream_upstream_check_find_shm_peer(ngx_stream_upstream_check_peers_shm_t *p
 
 
 static ngx_int_t
-ngx_stream_upstream_check_init_shm_peer(ngx_stream_upstream_check_peer_shm_t *psh,
-                                        ngx_stream_upstream_check_peer_shm_t *opsh, ngx_uint_t init_down,
+ngx_stream_upstream_check_init_shm_peer(ngx_upstream_check_peer_shm_t *psh,
+                                        ngx_upstream_check_peer_shm_t *opsh, ngx_uint_t init_down,
                                         ngx_pool_t *pool, ngx_str_t *name, ngx_str_t *upstream_name)
 {
     u_char  *file;
