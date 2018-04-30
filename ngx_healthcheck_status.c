@@ -380,14 +380,20 @@ static void
 ngx_upstream_check_status_html_format(ngx_buf_t *b,
     ngx_upstream_check_peers_t *peers, ngx_uint_t flag)
 {
-    ngx_uint_t                      i, count;
+    ngx_uint_t i,stream_count,http_count,stream_up_count,http_up_count;
     ngx_upstream_check_peer_t *peer;
 
     peer = peers->peers.elts;
 
-    count = 0;
-
+    stream_count = 0;
+    http_count = 0;
+    stream_up_count = 0;
+    http_up_count = 0;
     for (i = 0; i < peers->peers.nelts; i++) {
+
+        if (!peer[i].shm->down) {
+               stream_up_count ++;
+        }
 
         if (flag & NGX_CHECK_STATUS_DOWN) {
 
@@ -402,7 +408,31 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
             }
         }
 
-        count++;
+        stream_count++;
+    }
+
+    peers = http_peers_ctx; //http
+    peer = peers->peers.elts; 
+    for (i = 0; i < peers->peers.nelts; i++) {
+
+        if (!peer[i].shm->down) {
+               http_up_count ++;
+        }
+
+        if (flag & NGX_CHECK_STATUS_DOWN) {
+
+            if (!peer[i].shm->down) {
+                continue;
+            }
+
+        } else if (flag & NGX_CHECK_STATUS_UP) {
+
+            if (peer[i].shm->down) {
+                continue;
+            }
+        }
+
+        http_count++;
     }
 
     b->last = ngx_snprintf(b->last, b->end - b->last,
@@ -410,11 +440,14 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
             "\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n"
             "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n"
             "<head>\n"
-            "  <title>Nginx stream upstream check status</title>\n"
+            "  <title>Nginx upstream status checker</title>\n"
             "</head>\n"
             "<body>\n"
-            "<h1>Nginx stream upstream check status</h1>\n"
-            "<h2>Check upstream server number: %ui, generation: %ui</h2>\n"
+            "<h1  align=\"center\">Nginx upstream status monitor</h1>\n");
+
+// =======begin http data==========
+    b->last = ngx_snprintf(b->last, b->end - b->last,
+            "<h2>http upstream servers </h2> up: %ui down: %ui total: %ui\n"
             "<table style=\"background-color:white\" cellspacing=\"0\" "
             "       cellpadding=\"3\" border=\"1\">\n"
             "  <tr bgcolor=\"#C0C0C0\">\n"
@@ -427,7 +460,7 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
             "    <th>Check type</th>\n"
             "    <th>Check port</th>\n"
             "  </tr>\n",
-            count, ngx_stream_upstream_check_shm_generation);
+            http_up_count, http_count-http_up_count, http_count);
 
     for (i = 0; i < peers->peers.nelts; i++) {
 
@@ -467,9 +500,72 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
     }
 
     b->last = ngx_snprintf(b->last, b->end - b->last,
+            "</table>\n");
+
+// =======begin stream data==========
+    peers = stream_peers_ctx; //http
+    peer = peers->peers.elts; 
+
+    b->last = ngx_snprintf(b->last, b->end - b->last,
+            "<h2>stream upstream servers </h2> up: %ui down: %ui total: %ui\n"
+            "<table style=\"background-color:white\" cellspacing=\"0\" "
+            "       cellpadding=\"3\" border=\"1\">\n"
+            "  <tr bgcolor=\"#C0C0C0\">\n"
+            "    <th>Index</th>\n"
+            "    <th>Upstream</th>\n"
+            "    <th>Name</th>\n"
+            "    <th>Status</th>\n"
+            "    <th>Rise counts</th>\n"
+            "    <th>Fall counts</th>\n"
+            "    <th>Check type</th>\n"
+            "    <th>Check port</th>\n"
+            "  </tr>\n",
+            stream_up_count, stream_count-stream_up_count, stream_count);
+
+    for (i = 0; i < peers->peers.nelts; i++) {
+
+        if (flag & NGX_CHECK_STATUS_DOWN) {
+
+            if (!peer[i].shm->down) {
+                continue;
+            }
+
+        } else if (flag & NGX_CHECK_STATUS_UP) {
+
+            if (peer[i].shm->down) {
+                continue;
+            }
+        }
+
+        b->last = ngx_snprintf(b->last, b->end - b->last,
+                "  <tr%s>\n"
+                "    <td>%ui</td>\n"
+                "    <td>%V</td>\n"
+                "    <td>%V</td>\n"
+                "    <td>%s</td>\n"
+                "    <td>%ui</td>\n"
+                "    <td>%ui</td>\n"
+                "    <td>%V</td>\n"
+                "    <td>%ui</td>\n"
+                "  </tr>\n",
+                peer[i].shm->down ? " bgcolor=\"#FF0000\"" : "",
+                i,
+                peer[i].upstream_name,
+                &peer[i].peer_addr->name,
+                peer[i].shm->down ? "down" : "up",
+                peer[i].shm->rise_count,
+                peer[i].shm->fall_count,
+                &peer[i].conf->check_type_conf->name,
+                peer[i].conf->port);
+    }
+
+// =======end http data==========
+
+    b->last = ngx_snprintf(b->last, b->end - b->last,
             "</table>\n"
-            "</body>\n"
-            "</html>\n");
+            "<h2>total servers(check enabled): %ui </h2>\n"
+            "</body></html>\n",
+            stream_count+http_count);
 }
 
 
