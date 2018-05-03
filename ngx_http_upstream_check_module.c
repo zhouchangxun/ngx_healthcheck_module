@@ -3696,9 +3696,6 @@ ngx_http_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     number = peers->peers.nelts;
-    if (number == 0) {
-        return NGX_OK;
-    }
 
     pool = shm_zone->data;
     if (pool == NULL) {
@@ -3706,6 +3703,21 @@ ngx_http_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     shpool = (ngx_slab_pool_t *) shm_zone->shm.addr;
+
+    // alloc peers_shm
+    size = sizeof(*peers_shm) +
+           (number ) * sizeof(ngx_upstream_check_peer_shm_t);//last item not use :)
+    peers_shm = ngx_slab_alloc(shpool, size);
+
+    if (peers_shm == NULL) {
+        goto failure;
+    }
+    ngx_memzero(peers_shm, size);
+
+    peers_shm->generation = ngx_http_upstream_check_shm_generation;
+    peers_shm->checksum = peers->checksum;
+    peers_shm->number = number;
+    // end 
 
     ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
                   "[ngx-healthcheck][http] old data: %p ",data);
@@ -3743,21 +3755,8 @@ ngx_http_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
             }
         }
 
-        size = sizeof(*peers_shm) +
-               (number - 1) * sizeof(ngx_upstream_check_peer_shm_t);
-
-        peers_shm = ngx_slab_alloc(shpool, size);
-
-        if (peers_shm == NULL) {
-            goto failure;
-        }
-
-        ngx_memzero(peers_shm, size);
     }
 
-    peers_shm->generation = ngx_http_upstream_check_shm_generation;
-    peers_shm->checksum = peers->checksum;
-    peers_shm->number = number;
 
     peer = peers->peers.elts;
 

@@ -2057,11 +2057,6 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     number = peers->peers.nelts;
-    if (number == 0) {
-        ngx_log_error(NGX_LOG_NOTICE, shm_zone->shm.log, 0,
-                  "[ngx-healthcheck][stream][shm_zone] no peers, so skip alloc peer_shm");
-        return NGX_OK;
-    }
 
     pool = shm_zone->data;
     if (pool == NULL) {
@@ -2069,8 +2064,22 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     shpool = (ngx_slab_pool_t *) shm_zone->shm.addr;
+    // alloc peers_shm
+    size = sizeof(*peers_shm) +
+           (number ) * sizeof(ngx_upstream_check_peer_shm_t);//last item not use :)
+    peers_shm = ngx_slab_alloc(shpool, size);
 
-    if (data) {
+    if (peers_shm == NULL) {
+        goto failure;
+    }
+    ngx_memzero(peers_shm, size);
+
+    peers_shm->generation = ngx_stream_upstream_check_shm_generation;
+    peers_shm->checksum = peers->checksum;
+    peers_shm->number = number;
+    // end 
+
+    if (data) {// ozone.data
         ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
                   "[ngx-healthcheck][stream][shm_zone] found old shm");
         opeers_shm = data;
@@ -2098,6 +2107,7 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
                                                &ngx_stream_upstream_check_module);
 
             if (oshm_zone) {
+                //normally, to here.
                 opeers_shm = oshm_zone->data;
 
                 ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
@@ -2107,21 +2117,8 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
             }
         }
 
-        // alloc peers_shm
-        size = sizeof(*peers_shm) +
-               (number - 1) * sizeof(ngx_upstream_check_peer_shm_t);
-        peers_shm = ngx_slab_alloc(shpool, size);
+    }// if (!same) { 
 
-        if (peers_shm == NULL) {
-            goto failure;
-        }
-
-        ngx_memzero(peers_shm, size);
-    }
-
-    peers_shm->generation = ngx_stream_upstream_check_shm_generation;
-    peers_shm->checksum = peers->checksum;
-    peers_shm->number = number;
 
     peer = peers->peers.elts;
 
@@ -2154,6 +2151,7 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
             opeer_shm = ngx_stream_upstream_check_find_shm_peer(opeers_shm,
                                                                 peer[i].peer_addr, peer[i].upstream_name);
             if (opeer_shm) {
+                //find opeer, copy status data.
                 ngx_log_debug1(NGX_LOG_DEBUG_STREAM, shm_zone->shm.log, 0,
                                "stream upstream check, inherit opeer: %V ",
                                &peer[i].peer_addr->name);
@@ -2164,10 +2162,11 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
                     return NGX_ERROR;
                 }
 
-                continue;
+                continue; //next peer
             }
         }
 
+        // init new peer status data.
         ucscf = peer[i].conf;
         rc = ngx_stream_upstream_check_init_shm_peer(peer_shm, NULL,
                                                      ucscf->default_down, pool,
