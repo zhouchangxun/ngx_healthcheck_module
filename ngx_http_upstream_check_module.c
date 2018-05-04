@@ -3952,6 +3952,8 @@ ngx_http_upstream_check_init_process(ngx_cycle_t *cycle)
 
     ucmcf = ngx_http_cycle_get_module_main_conf(cycle, ngx_http_upstream_check_module);
     if (ucmcf == NULL) {
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                     "[ngx-healthcheck][http][init-process] no http section, skip init");
         return NGX_OK;
     }
 

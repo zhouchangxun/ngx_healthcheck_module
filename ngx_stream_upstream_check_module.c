@@ -318,7 +318,7 @@ ngx_stream_upstream_check_add_peer(ngx_conf_t *cf,
     ngx_stream_upstream_check_main_conf_t  *ucmcf;
 
     ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
-                      "[ngx-healthcheck][stream][called by stream module] add a peer:( %V ) to health check list.",
+                      "[ngx-healthcheck][stream][api] add a peer:( %V ) to health check list.",
                       &peer_addr->name);
 
     if (us->srv_conf == NULL) {
@@ -503,8 +503,8 @@ ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle)
 
     peers = stream_peers_ctx;
     if (peers == NULL) {
-        ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
-                     "[ngx-healthcheck][init_process][bug]peers==NULL");
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                     "[ngx-healthcheck][stream][timers] no stream section, skip init");
         return NGX_OK;
     }
 
@@ -1702,6 +1702,10 @@ ngx_stream_upstream_check(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         ucscf->check_type_conf = ngx_http_get_check_type_conf(&s);
     }
 
+    ngx_conf_log_error(NGX_LOG_NOTICE /* current level always it */, cf, 0,
+                       "[ngx-healthcheck][stream][directive] found check arg:"
+                       "[port:%d,interval:%d,timeout:%d,fall:%d,rise:%d,default_down:%d]", 
+                       port,interval,timeout,rise,default_down);
     return NGX_CONF_OK;
 
     invalid_check_parameter:
@@ -2318,6 +2322,14 @@ ngx_stream_upstream_check_init_shm_peer(ngx_upstream_check_peer_shm_t *psh,
 static ngx_int_t
 ngx_stream_upstream_check_init_process(ngx_cycle_t *cycle)
 {
+    ngx_stream_upstream_check_main_conf_t  *ucmcf;
+    ucmcf = ngx_stream_cycle_get_module_main_conf(cycle, ngx_stream_upstream_check_module);
+    if (ucmcf == NULL) {
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
+                     "[ngx-healthcheck][stream][init-process] no stream section, skip init");
+        return NGX_OK;
+    }
+
     return ngx_stream_upstream_check_add_timers(cycle);
 }
 
