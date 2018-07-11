@@ -2326,7 +2326,8 @@ ngx_stream_upstream_check_init_process(ngx_cycle_t *cycle)
     ucmcf = ngx_stream_cycle_get_module_main_conf(cycle, ngx_stream_upstream_check_module);
     if (ucmcf == NULL) {
         ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
-                     "[ngx-healthcheck][stream][init-process] no stream section, skip init");
+                     "[ngx-healthcheck][stream][init-process] no stream section, skip init,stream_peers_ctx:%p",stream_peers_ctx);
+        stream_peers_ctx = NULL;
         return NGX_OK;
     }
 

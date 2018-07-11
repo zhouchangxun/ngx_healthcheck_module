@@ -265,16 +265,20 @@ ngx_upstream_check_status_handler(ngx_http_request_t *r)
                  "[ngx-healthcheck][status-interface]"
                  " stream_peers_ctx:%p, http_peers_ctx:%p",
                  stream_peers_ctx, http_peers_ctx);
-
-    peers = stream_peers_ctx; // status data provided by stream_upstream_health_check_module.
+    peers = http_peers_ctx; 
+/*
     if (peers == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                     "[ngx-healthcheck][status-interface] peers == NULL");
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-
+*/
     // 1/4 pagesize for each record
-    buffer_size = peers->peers.nelts * ngx_pagesize / 4;
+    if(stream_peers_ctx == NULL){
+        buffer_size = http_peers_ctx->peers.nelts * ngx_pagesize / 4;
+    }else{
+        buffer_size = (stream_peers_ctx->peers.nelts + http_peers_ctx->peers.nelts) * ngx_pagesize / 4;
+    }
     buffer_size = ngx_align(buffer_size, ngx_pagesize) + ngx_pagesize;
 
     b = ngx_create_temp_buf(r->pool, buffer_size);
@@ -383,55 +387,28 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
     ngx_uint_t i,stream_count,http_count,stream_up_count,http_up_count;
     ngx_upstream_check_peer_t *peer;
 
-    peer = peers->peers.elts;
-
     stream_count = 0;
     http_count = 0;
     stream_up_count = 0;
     http_up_count = 0;
-    for (i = 0; i < peers->peers.nelts; i++) {
 
-        if (!peer[i].shm->down) {
-               stream_up_count ++;
-        }
-
-        if (flag & NGX_CHECK_STATUS_DOWN) {
-
+    peers = stream_peers_ctx;
+    if(peers != NULL){
+        peer = peers->peers.elts;
+        for (i = 0; i < peers->peers.nelts; i++) {
             if (!peer[i].shm->down) {
-                continue;
+                   stream_up_count ++;
             }
-
-        } else if (flag & NGX_CHECK_STATUS_UP) {
-
-            if (peer[i].shm->down) {
-                continue;
-            }
+            stream_count++;
         }
-
-        stream_count++;
     }
 
     peers = http_peers_ctx; //http
     peer = peers->peers.elts; 
     for (i = 0; i < peers->peers.nelts; i++) {
-
         if (!peer[i].shm->down) {
                http_up_count ++;
         }
-
-        if (flag & NGX_CHECK_STATUS_DOWN) {
-
-            if (!peer[i].shm->down) {
-                continue;
-            }
-
-        } else if (flag & NGX_CHECK_STATUS_UP) {
-
-            if (peer[i].shm->down) {
-                continue;
-            }
-        }
-
         http_count++;
     }
 
@@ -463,15 +440,11 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
             http_up_count, http_count-http_up_count, http_count);
 
     for (i = 0; i < peers->peers.nelts; i++) {
-
         if (flag & NGX_CHECK_STATUS_DOWN) {
-
             if (!peer[i].shm->down) {
                 continue;
             }
-
         } else if (flag & NGX_CHECK_STATUS_UP) {
-
             if (peer[i].shm->down) {
                 continue;
             }
@@ -503,8 +476,6 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
             "</table>\n");
 
 // =======begin stream data==========
-    peers = stream_peers_ctx; //http
-    peer = peers->peers.elts; 
 
     b->last = ngx_snprintf(b->last, b->end - b->last,
             "<h2>stream upstream servers </h2> up: %ui down: %ui total: %ui\n"
@@ -522,44 +493,42 @@ ngx_upstream_check_status_html_format(ngx_buf_t *b,
             "  </tr>\n",
             stream_up_count, stream_count-stream_up_count, stream_count);
 
-    for (i = 0; i < peers->peers.nelts; i++) {
-
-        if (flag & NGX_CHECK_STATUS_DOWN) {
-
-            if (!peer[i].shm->down) {
-                continue;
+    peers = stream_peers_ctx; //stream
+    if(peers != NULL){
+        peer = peers->peers.elts; 
+        for (i = 0; i < peers->peers.nelts; i++) {
+            if (flag & NGX_CHECK_STATUS_DOWN) {
+                if (!peer[i].shm->down) {
+                    continue;
+                }
+            } else if (flag & NGX_CHECK_STATUS_UP) {
+                if (peer[i].shm->down) {
+                    continue;
+                }
             }
 
-        } else if (flag & NGX_CHECK_STATUS_UP) {
-
-            if (peer[i].shm->down) {
-                continue;
-            }
+            b->last = ngx_snprintf(b->last, b->end - b->last,
+                    "  <tr%s>\n"
+                    "    <td>%ui</td>\n"
+                    "    <td>%V</td>\n"
+                    "    <td>%V</td>\n"
+                    "    <td>%s</td>\n"
+                    "    <td>%ui</td>\n"
+                    "    <td>%ui</td>\n"
+                    "    <td>%V</td>\n"
+                    "    <td>%ui</td>\n"
+                    "  </tr>\n",
+                    peer[i].shm->down ? " bgcolor=\"#FF0000\"" : "",
+                    i,
+                    peer[i].upstream_name,
+                    &peer[i].peer_addr->name,
+                    peer[i].shm->down ? "down" : "up",
+                    peer[i].shm->rise_count,
+                    peer[i].shm->fall_count,
+                    &peer[i].conf->check_type_conf->name,
+                    peer[i].conf->port);
         }
-
-        b->last = ngx_snprintf(b->last, b->end - b->last,
-                "  <tr%s>\n"
-                "    <td>%ui</td>\n"
-                "    <td>%V</td>\n"
-                "    <td>%V</td>\n"
-                "    <td>%s</td>\n"
-                "    <td>%ui</td>\n"
-                "    <td>%ui</td>\n"
-                "    <td>%V</td>\n"
-                "    <td>%ui</td>\n"
-                "  </tr>\n",
-                peer[i].shm->down ? " bgcolor=\"#FF0000\"" : "",
-                i,
-                peer[i].upstream_name,
-                &peer[i].peer_addr->name,
-                peer[i].shm->down ? "down" : "up",
-                peer[i].shm->rise_count,
-                peer[i].shm->fall_count,
-                &peer[i].conf->check_type_conf->name,
-                peer[i].conf->port);
     }
-
-// =======end http data==========
 
     b->last = ngx_snprintf(b->last, b->end - b->last,
             "</table>\n"
@@ -618,42 +587,34 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
     count = 0;
 
     peers = stream_peers_ctx; //stream
-    peer = peers->peers.elts; 
-    for (i = 0; i < peers->peers.nelts; i++) {
-
-        if (flag & NGX_CHECK_STATUS_DOWN) {
-
-            if (!peer[i].shm->down) {
-                continue;
+    if(peers != NULL){
+        peer = peers->peers.elts; 
+        for (i = 0; i < peers->peers.nelts; i++) {
+            if (flag & NGX_CHECK_STATUS_DOWN) {
+                if (!peer[i].shm->down) {
+                    continue;
+                }
+            } else if (flag & NGX_CHECK_STATUS_UP) {
+                if (peer[i].shm->down) {
+                    continue;
+                }
             }
-
-        } else if (flag & NGX_CHECK_STATUS_UP) {
-
-            if (peer[i].shm->down) {
-                continue;
-            }
+            count++;
         }
-
-        count++;
     }
 
     peers = http_peers_ctx; //http
     peer = peers->peers.elts; 
     for (i = 0; i < peers->peers.nelts; i++) {
-
         if (flag & NGX_CHECK_STATUS_DOWN) {
-
             if (!peer[i].shm->down) {
                 continue;
             }
-
         } else if (flag & NGX_CHECK_STATUS_UP) {
-
             if (peer[i].shm->down) {
                 continue;
             }
         }
-
         count++;
     }
 
@@ -668,15 +629,11 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
 //http
     last = peers->peers.nelts - 1;
     for (i = 0; i < peers->peers.nelts; i++) {
-
         if (flag & NGX_CHECK_STATUS_DOWN) {
-
             if (!peer[i].shm->down) {
                 continue;
             }
-
         } else if (flag & NGX_CHECK_STATUS_UP) {
-
             if (peer[i].shm->down) {
                 continue;
             }
@@ -710,43 +667,41 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
             "  \"stream\": [\n");
 
     peers = stream_peers_ctx; //stream
-    peer = peers->peers.elts; 
-
-    last = peers->peers.nelts - 1;
-    for (i = 0; i < peers->peers.nelts; i++) {
-
-        if (flag & NGX_CHECK_STATUS_DOWN) {
-
-            if (!peer[i].shm->down) {
-                continue;
+    if(peers != NULL){
+        peer = peers->peers.elts; 
+    
+        last = peers->peers.nelts - 1;
+        for (i = 0; i < peers->peers.nelts; i++) {
+            if (flag & NGX_CHECK_STATUS_DOWN) {
+                if (!peer[i].shm->down) {
+                    continue;
+                }
+            } else if (flag & NGX_CHECK_STATUS_UP) {
+                if (peer[i].shm->down) {
+                    continue;
+                }
             }
-
-        } else if (flag & NGX_CHECK_STATUS_UP) {
-
-            if (peer[i].shm->down) {
-                continue;
-            }
+    
+            b->last = ngx_snprintf(b->last, b->end - b->last,
+                    "    {\"index\": %ui, "
+                    "\"upstream\": \"%V\", "
+                    "\"name\": \"%V\", "
+                    "\"status\": \"%s\", "
+                    "\"rise\": %ui, "
+                    "\"fall\": %ui, "
+                    "\"type\": \"%V\", "
+                    "\"port\": %ui}"
+                    "%s\n",
+                    i,
+                    peer[i].upstream_name,
+                    &peer[i].peer_addr->name,
+                    peer[i].shm->down ? "down" : "up",
+                    peer[i].shm->rise_count,
+                    peer[i].shm->fall_count,
+                    &peer[i].conf->check_type_conf->name,
+                    peer[i].conf->port,
+                    (i == last) ? "" : ",");
         }
-
-        b->last = ngx_snprintf(b->last, b->end - b->last,
-                "    {\"index\": %ui, "
-                "\"upstream\": \"%V\", "
-                "\"name\": \"%V\", "
-                "\"status\": \"%s\", "
-                "\"rise\": %ui, "
-                "\"fall\": %ui, "
-                "\"type\": \"%V\", "
-                "\"port\": %ui}"
-                "%s\n",
-                i,
-                peer[i].upstream_name,
-                &peer[i].peer_addr->name,
-                peer[i].shm->down ? "down" : "up",
-                peer[i].shm->rise_count,
-                peer[i].shm->fall_count,
-                &peer[i].conf->check_type_conf->name,
-                peer[i].conf->port,
-                (i == last) ? "" : ",");
     }
 
     b->last = ngx_snprintf(b->last, b->end - b->last,
