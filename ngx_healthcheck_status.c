@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017- Changxun Zhou(zhoucx@dtdream.com)
+ * Copyright (C) 2017- Changxun Zhou(changxunzhou@qq.com)
  * desc: Healthcheck status interface
  */
 
@@ -545,6 +545,9 @@ ngx_upstream_check_status_csv_format(ngx_buf_t *b,
     ngx_uint_t                       i;
     ngx_upstream_check_peer_t  *peer;
 
+    b->last = ngx_snprintf(b->last, b->end - b->last,
+            "index,upstream_type,upstream_name,host,rise,fall,check_type,check_port,status\n");
+    peers = http_peers_ctx; //http
     peer = peers->peers.elts;
     for (i = 0; i < peers->peers.nelts; i++) {
 
@@ -562,15 +565,44 @@ ngx_upstream_check_status_csv_format(ngx_buf_t *b,
         }
 
         b->last = ngx_snprintf(b->last, b->end - b->last,
-                "%ui,%V,%V,%s,%ui,%ui,%V,%ui\n",
+                "%ui,http,%V,%V,%ui,%ui,%V,%ui,%s\n",
                 i,
                 peer[i].upstream_name,
                 &peer[i].peer_addr->name,
-                peer[i].shm->down ? "down" : "up",
                 peer[i].shm->rise_count,
                 peer[i].shm->fall_count,
                 &peer[i].conf->check_type_conf->name,
-                peer[i].conf->port);
+                peer[i].conf->port,
+                peer[i].shm->down ? "down" : "up");
+    }
+    peers = stream_peers_ctx; //stream
+    if(peers == NULL) return;
+    peer = peers->peers.elts;
+    for (i = 0; i < peers->peers.nelts; i++) {
+
+        if (flag & NGX_CHECK_STATUS_DOWN) {
+
+            if (!peer[i].shm->down) {
+                continue;
+            }
+
+        } else if (flag & NGX_CHECK_STATUS_UP) {
+
+            if (peer[i].shm->down) {
+                continue;
+            }
+        }
+
+        b->last = ngx_snprintf(b->last, b->end - b->last,
+                "%ui,stream,%V,%V,%ui,%ui,%V,%ui,%s\n",
+                i,
+                peer[i].upstream_name,
+                &peer[i].peer_addr->name,
+                peer[i].shm->rise_count,
+                peer[i].shm->fall_count,
+                &peer[i].conf->check_type_conf->name,
+                peer[i].conf->port,
+                peer[i].shm->down ? "down" : "up");
     }
 }
 
@@ -579,7 +611,8 @@ static void
 ngx_upstream_check_status_json_format(ngx_buf_t *b,
     ngx_upstream_check_peers_t *peers, ngx_uint_t flag)
 {
-    ngx_uint_t                       count, i, last;
+    ngx_uint_t                 count, i;
+    ngx_uint_t stream_count=0, http_count=0;
     ngx_upstream_check_peer_t  *peer;
 
 
@@ -587,7 +620,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
     count = 0;
 
     peers = stream_peers_ctx; //stream
-    if(peers != NULL){
+    if(peers != NULL){  //when no stream section, peers is NULL
         peer = peers->peers.elts; 
         for (i = 0; i < peers->peers.nelts; i++) {
             if (flag & NGX_CHECK_STATUS_DOWN) {
@@ -599,7 +632,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
                     continue;
                 }
             }
-            count++;
+            count++;stream_count++;
         }
     }
 
@@ -615,7 +648,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
                 continue;
             }
         }
-        count++;
+        count++;http_count++;
     }
 
     b->last = ngx_snprintf(b->last, b->end - b->last,
@@ -627,7 +660,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
             ngx_stream_upstream_check_shm_generation);
 
 //http
-    last = peers->peers.nelts - 1;
+    count = 0;
     for (i = 0; i < peers->peers.nelts; i++) {
         if (flag & NGX_CHECK_STATUS_DOWN) {
             if (!peer[i].shm->down) {
@@ -638,7 +671,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
                 continue;
             }
         }
-
+        count++; 
         b->last = ngx_snprintf(b->last, b->end - b->last,
                 "    {\"index\": %ui, "
                 "\"upstream\": \"%V\", "
@@ -657,7 +690,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
                 peer[i].shm->fall_count,
                 &peer[i].conf->check_type_conf->name,
                 peer[i].conf->port,
-                (i == last) ? "" : ",");
+                (count == http_count) ? "" : ",");
     }
 
 //http end
@@ -667,10 +700,10 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
             "  \"stream\": [\n");
 
     peers = stream_peers_ctx; //stream
+    count = 0;
     if(peers != NULL){
         peer = peers->peers.elts; 
     
-        last = peers->peers.nelts - 1;
         for (i = 0; i < peers->peers.nelts; i++) {
             if (flag & NGX_CHECK_STATUS_DOWN) {
                 if (!peer[i].shm->down) {
@@ -681,7 +714,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
                     continue;
                 }
             }
-    
+            count++; 
             b->last = ngx_snprintf(b->last, b->end - b->last,
                     "    {\"index\": %ui, "
                     "\"upstream\": \"%V\", "
@@ -700,7 +733,7 @@ ngx_upstream_check_status_json_format(ngx_buf_t *b,
                     peer[i].shm->fall_count,
                     &peer[i].conf->check_type_conf->name,
                     peer[i].conf->port,
-                    (i == last) ? "" : ",");
+                    (count == stream_count) ? "" : ",");
         }
     }
 
