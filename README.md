@@ -31,7 +31,7 @@ This nginx module is still under development， you can help improve and it.
 这个项目还在开发中完善中，欢迎贡献代码，或报告bug。一起使它变得更好。  
 有意愿一起开发完善的同学或者有疑问的可以联系我：
 - `QQ`:373882405
-- `mail`: zhoucx@dtdream.com
+- `mail`: changxunzhou@qq.com
 
 Description
 ===========

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017- Changxun Zhou(zhoucx@dtdream.com)
+ * Copyright (C) 2017- Changxun Zhou(changxunzhou@qq.com)
  * desc: http upstream server health check.
  * note: base on https://github.com/yaoweibin/nginx_upstream_check_module
  */

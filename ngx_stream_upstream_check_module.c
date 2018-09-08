@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017- Changxun Zhou(zhoucx@dtdream.com)
+ * Copyright (C) 2017- Changxun Zhou(changxunzhou@qq.com)
  * desc: stream upstream server health check.
  */
 
