@@ -229,6 +229,28 @@ http {
 }
 ```
 
+You can specify the default display format. The formats can be `html`,
+ `csv` or `json`. The default type is `html`. It also supports to specify
+the format by the request argument. Suppose your `check_status` location
+is '/status', the argument of `format` can change the display page's
+format. You can do like this:
+
+ /status?format=html
+
+ /status?format=csv
+
+ /status?format=json
+
+At present, you can fetch the list of servers with the same status by
+the argument of `status`. For example:
+
+ /status?format=json&status=down
+
+ /status?format=html&status=down
+
+ /status?format=csv&status=up
+
+
 [Back to TOC](#table-of-contents)
 
 
