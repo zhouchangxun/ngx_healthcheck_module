@@ -4,7 +4,7 @@
 Travis CI build details : [Click to see](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module)
 
 > Health-checker for Nginx upstream servers (support http upstream && stream upstream)  
-> 该模块可以为Nginx提供主动式后端服务器健康检查的功能（同时支持四层和七层后端服务器的健康检测）。
+> This module can provide NGINX with the capability of active back-end server health check (supports health check of both four and seven back-end servers).
 
 ![html status ouput](http://oh-my.ga/disk/img/check-html.png)
 
@@ -28,24 +28,25 @@ Status
 
 This nginx module is still under development， you can help improve and it.
 
-这个项目还在开发中完善中，欢迎贡献代码，或报告bug。一起使它变得更好。  
-有意愿一起开发完善的同学或者有疑问的可以联系我：
+The project is also well developed in development, and you are welcome to contribute code, or report bugs. Together to make it better.
+
+If you have any questions, please contact me:
 - `QQ`:373882405
 - `mail`: changxunzhou@qq.com
 
 Description
 ===========
 
-当你使用nginx作为负载均衡器时，nginx原生只提供了基本的重试方式来保证访问到正常的后端服务器。  
+When you use nginx as a load balancer, nginx natively provides only basic retries to ensure access to a normal backend server.
 
-相比之下，这个nginx第三方模块可以对后端服务器提供主动式的健康状态检测。  
-它维护了一个后端服务器列表，保证新的请求直接发送到一个健康的后端服务器。
+In contrast, this nginx third-party module provides proactive health State Detection for back-end servers.  
+It maintains a list of back-end servers that guarantee that new requests are sent directly to a healthy back-end server.
 
-主要特性：
-- 同时支持四层和七层后端服务器的健康检测
-- 四层支持的检测类型：tcp / udp / http
-- 七层支持的检测类型：http / fastcgi
-- 提供一个统一的http状态查询接口，输出格式：html / json / csv
+Key features:
+- Supports health detection for both four-tier and seven-tier back-end servers
+- Four-layer supported detection type: `tcp` / `udp` / `http`
+- Seven-layer supported detection Type: `http` / `fastcgi`
+- Provide a unified http status query interface, output format: `html` / `json` / `csv`
 
 Installation
 ============
@@ -171,23 +172,20 @@ check
 
 `Context`: http/upstream || stream/upstream
 
-该指令可以打开后端服务器的健康检查功能。
+This command can open the back-end server health check function.
 
 `Detail`
 
-- interval：向后端发送的健康检查包的间隔。
-- fall(fall_count): 如果连续失败次数达到fall_count，服务器就被认为是down。
-- rise(rise_count): 如果连续成功次数达到rise_count，服务器就被认为是up。
-- timeout: 后端健康请求的超时时间。
-- default_down: 设定初始时服务器的状态，如果是true，就说明默认是down的，如果是false，就是up的。
-  默认值是true，也就是一开始服务器认为是不可用，要等健康检查包达到一定成功次数以后才会被认为是健康的。
-- type：健康检查包的类型，现在支持以下多种类型
-  - tcp：简单的tcp连接，如果连接成功，就说明后端正常。
-  - udp：简单的发送udp报文，如果收到icmp error(主机或端口不可达)，就说明后端异常。(只有stream配置块中支持udp类型检查)
-  - http：发送HTTP请求，通过后端的回复包的状态来判断后端是否存活。
-
-- port: 指定后端服务器的检查端口。你可以指定不同于真实服务的后端服务器的端口，
-比如后端提供的是443端口的应用，你可以去检查80端口的状态来判断后端健康状况。默认是0，表示跟后端server提供真实服务的端口一样。
+- `interval`: the interval of the health check packet sent to the backend.
+- `fall` (`fall_count`): the server is considered down if the number of consecutive failures reaches fall_count.
+- `rise` (`rise_count`): the server is considered up if the number of consecutive successes reaches rise_count.
+- `timeout`: timeout for the back-end health request.
+- `default_down`: set the initial state of the server, if it is true, it means that the default is down, if it is false, is up.
+  The default value is true, which is the beginning of the server that is not available, to wait for the health check package reaches a certain number of times after the success will be considered healthy.
+- `type`: type of health check pack, now supports the following types
+  - `tcp`: simple tcp connection, if the connection is successful, it shows the back-end normal.
+  - `udp`: simple to send udp packets, if you receive icmp error (host or port unreachable), it shows the back-end exception.(Only UDP type checking is supported in the stream configuration block)
+  - `http`: send an HTTP request, by the state of the back-end reply packet to determine whether the back-end survival.
 
 A example as followed:
 ```nginx
