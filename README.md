@@ -52,11 +52,12 @@ Installation
 ============
 
 ```
-git clone https://github.com/nginx/nginx/nginx.git
+git clone https://github.com/nginx/nginx.git
 git clone https://github.com/zhouchangxun/ngx_healthcheck_module.git
 
-cd nginx/; 
-git apply ../ngx_healthcheck_module/nginx-stable-1.12+.patch
+cd nginx/;
+git checkout branches/stable-1.12
+git apply ../ngx_healthcheck_module/nginx_healthcheck_for_nginx_1.12+.patch
 
 ./auto/configure --with-stream --add-module=../ngx_healthcheck_module/
 make && make install
