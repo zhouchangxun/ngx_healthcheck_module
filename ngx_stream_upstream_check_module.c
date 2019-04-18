@@ -1953,9 +1953,6 @@ ngx_stream_upstream_check_init_srv_conf(ngx_conf_t *cf, void *conf)
     check = ucscf->check_type_conf;
 
     if (check) {
-        //todo(zhocux): what's mean?
-        ucscf->send.data = check->default_send.data;
-        ucscf->send.len = check->default_send.len;
         //for http 
         if (ucscf->code.status_alive == 0) {
             ucscf->code.status_alive = check->default_status_alive;
