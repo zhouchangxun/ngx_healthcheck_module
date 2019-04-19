@@ -3,10 +3,12 @@
 ![loading](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module.svg?branch=master)
 Travis CI build details : [Click to see](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module)
 
+(中文版本请参看[这里](https://github.com/zhouchangxun/ngx_healthcheck_module/edit/master/README-zh_CN.md))
+
 > Health-checker for Nginx upstream servers (support http upstream && stream upstream)  
 > This module can provide NGINX with the capability of active back-end server health check (supports health check of both four and seven back-end servers).
 
-![html status ouput](http://oh-my.ga/disk/img/check-html.png)
+![html status ouput](http://zhouchangxun.github.io/disk/img/check-html.png)
 
 Table of Contents
 =================
@@ -129,7 +131,7 @@ stream {
         check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=udp;
     }
     server {
-        listen 53;
+        listen 53 udp;
         proxy_pass udp-cluster;
     }
     
@@ -256,9 +258,9 @@ the argument of `status`. For example:
 Todo List
 =========
 
-- 增加测试用例
-- 整理、优化代码
-- 规范代码中的log输出
+- add testcase.
+- code style.
+- feature enhance.
 
 [Back to TOC](#table-of-contents)
 
