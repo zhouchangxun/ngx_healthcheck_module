@@ -3,7 +3,7 @@
 ![loading](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module.svg?branch=master)
 Travis CI build details : [Click to see](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module)
 
-(中文版本请参看[这里](https://github.com/zhouchangxun/ngx_healthcheck_module/edit/master/README-zh_CN.md))
+(中文版本请参看[这里](https://github.com/zhouchangxun/ngx_healthcheck_module/blob/master/README-zh_CN.md))
 
 > Health-checker for Nginx upstream servers (support http upstream && stream upstream)  
 > This module can provide NGINX with the capability of active back-end server health check (supports health check of both four and seven back-end servers).
