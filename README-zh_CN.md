@@ -3,7 +3,7 @@
 ![loading](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module.svg?branch=master)
 Travis CI 构建状态 : [点击查看](https://travis-ci.org/zhouchangxun/ngx_healthcheck_module)
 
-(English language see [here](https://github.com/zhouchangxun/ngx_healthcheck_module/edit/master/README.md))
+(English language see [here](https://github.com/zhouchangxun/ngx_healthcheck_module))
 
 > 该模块可以为Nginx提供主动式后端服务器健康检查的功能（同时支持四层和七层后端服务器的健康检测）。
 
@@ -12,17 +12,17 @@ Travis CI 构建状态 : [点击查看](https://travis-ci.org/zhouchangxun/ngx_h
 Table of Contents
 =================
 
-* [项目状态](#status)
-* [描述](#description)
-* [如何安装](#installation)
-* [基本用法](#usage)
-* [扩充的nginx指令用法](#synopsis)
+* [项目状态](#项目状态)
+* [描述](#描述)
+* [如何安装](#如何安装)
+* [基本用法](#基本用法)
+* [扩充的nginx指令用法](#扩充的nginx指令用法)
   * [healthcheck](#healthcheck)
   * [check](#check)
-* [错误和补丁](#bugs-and-patches)
-* [关于作者](#author)
-* [版权和许可](#copyright-and-license)
-* [相关链接](#see-also)
+* [错误和补丁](#错误和补丁)
+* [关于作者](#关于作者)
+* [版权和许可](#版权和许可)
+* [相关链接](#相关链接)
 
 项目状态
 ======
