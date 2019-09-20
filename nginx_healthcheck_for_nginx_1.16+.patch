@@ -259,7 +259,7 @@ index 4fa9a2d..96724a1 100644
              ngx_stream_upstream_rr_peer_unlock(hp->rrp.peers, peer);
              goto next;
          }
-+        
++
 +#if (NGX_STREAM_UPSTREAM_CHECK)
 +        ngx_log_debug1(NGX_LOG_DEBUG_STREAM, pc->log, 0,
 +                "(stream_module)get least_conn peer, check_index: %ui",
