@@ -268,7 +268,7 @@ static ngx_check_conf_t  ngx_check_types[] = {
                 0 }, //zhoucx: need_keepalive ? i change it to no
         { NGX_CHECK_TYPE_UDP,
                 ngx_string("udp"),
-                ngx_string("X"),/* zhoucx: default send data.
+                ngx_string("NGX_UDP_CHECKER"),/* zhoucx: default send data.
                                  (we must send some data and then call recv to trigger icmp error response).*/
                 0,
                 ngx_stream_upstream_check_send_handler,
@@ -1945,15 +1945,16 @@ ngx_stream_upstream_check_init_srv_conf(ngx_conf_t *cf, void *conf)
     if (ucscf->check_keepalive_requests == NGX_CONF_UNSET_UINT) {
         ucscf->check_keepalive_requests = 1;
     }
-
     if (ucscf->check_type_conf == NGX_CONF_UNSET_PTR) {
         ucscf->check_type_conf = NULL;
-    }
-
-    check = ucscf->check_type_conf;
-
-    if (check) {
-        //for http 
+    } else {
+        check = ucscf->check_type_conf;
+        // if no directive "http_check_send" for current upstream.
+        if (ucscf->send.data == NULL) {
+            ucscf->send.data = check->default_send.data;
+            ucscf->send.len = check->default_send.len;
+        }
+        //for http
         if (ucscf->code.status_alive == 0) {
             ucscf->code.status_alive = check->default_status_alive;
         }
