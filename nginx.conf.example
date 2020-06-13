@@ -6,10 +6,13 @@ error_log  logs/error.log  info;
 events {
     worker_connections  1024;
 }
-
 http {
+   log_format  main  '$remote_addr -> $server_addr:$server_port [$time_local] "$request" '
+                  '$status $body_bytes_sent "$http_referer" '
+                  '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log logs/access.log main;
     server {
-        listen 80;
+        listen 8081;
         # status interface
         location /status {
             healthcheck_status json;
@@ -19,45 +22,58 @@ http {
           proxy_pass http://http-cluster;
         }   
     }
-    # as a backend server.
+    # as a backend server1.
     server {
-        listen 8080;
+        listen 127.0.0.1:8082;
         location / {
-          root html;
+          default_type application/json ;
+          return 201  '{"name":"server1","status": "UP"}';
+        }
+    }
+    # as a backend server2.
+    server {
+        listen 127.0.0.2:8082;
+        location / {
+          default_type application/json ;
+          return 202  '{"name":"server2","status": "DOWN"}';
         }
     }
     
     upstream http-cluster {
         # simple round-robin
-        server 127.0.0.1:8080;
-        server 127.0.0.2:81;
+        server 127.0.0.1:8082;
+        server 127.0.0.2:8082;
 
         check interval=3000 rise=2 fall=5 timeout=5000 type=http;
-        check_http_send "GET / HTTP/1.0\r\n\r\n";
+        check_http_send "GET /heartbeat HTTP/1.0\r\n\r\n";
         check_http_expect_alive http_2xx http_3xx;
+        check_http_body '"status": "UP"';
     }
 }
 
 stream {
     upstream tcp-cluster {
         # simple round-robin
-        server 127.0.0.1:22;
-        server 192.168.0.2:22;
+        server 127.0.0.1:22; # nomarl
+        server 192.168.0.2:22; # no route to host
         check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=tcp;
     }
     upstream udp-cluster {
         # simple round-robin
-        server 127.0.0.1:53;
-        server 8.8.8.8:53;
+        server 127.0.0.1:5432; # port unreachable
+        server 8.8.8.8:5432; # no error icmp msg
         check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=udp;
+        check_http_send "UDP_TEST";
     }
-    server {
-        listen 522;
-        proxy_pass tcp-cluster;
+
+    upstream http-cluster2 {
+        # simple round-robin
+        server 127.0.0.1:8082;
+        server 127.0.0.2:8082;
+
+        check interval=3000 rise=2 fall=5 timeout=5000 type=http;
+        #check_http_send "GET /heartbeat HTTP/1.0\r\n\r\n";
+        check_http_expect_alive http_2xx http_3xx;
+        check_http_body '"status": "UP"';
     }
-    server {
-        listen 53;
-        proxy_pass udp-cluster;
-    }
-    
 }

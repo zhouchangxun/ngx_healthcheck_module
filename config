@@ -6,7 +6,8 @@ ngx_feature_deps="$ngx_addon_dir/ngx_http_upstream_check_module.h \
                   $ngx_addon_dir/ngx_stream_upstream_check_module.h "
 ngx_feature_src="$ngx_addon_dir/ngx_http_upstream_check_module.c \
                  $ngx_addon_dir/ngx_stream_upstream_check_module.c \
-                 $ngx_addon_dir/ngx_healthcheck_status.c "
+                 $ngx_addon_dir/ngx_healthcheck_status.c \
+                 $ngx_addon_dir/common.c "
 
 
 have=NGX_STREAM_UPSTREAM_CHECK . auto/have

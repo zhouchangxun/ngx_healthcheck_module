@@ -235,11 +235,8 @@ static void ngx_http_upstream_check_dummy_handler(ngx_event_t *event);
 
 static ngx_int_t ngx_http_upstream_check_http_init(
     ngx_upstream_check_peer_t *peer);
-static ngx_int_t ngx_http_upstream_check_http_parse(
+ngx_int_t ngx_upstream_check_http_parse(
     ngx_upstream_check_peer_t *peer);
-static ngx_int_t ngx_http_upstream_check_parse_status_line(
-    ngx_http_upstream_check_ctx_t *ctx, ngx_buf_t *b,
-    ngx_http_status_t *status);
 static void ngx_http_upstream_check_http_reinit(
     ngx_upstream_check_peer_t *peer);
 
@@ -319,6 +316,8 @@ static char *ngx_http_upstream_check_keepalive_requests(ngx_conf_t *cf,
 static char *ngx_http_upstream_check_http_send(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
 static char *ngx_http_upstream_check_http_expect_alive(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf);
+static char *ngx_http_upstream_check_http_body(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
 
 static char *ngx_http_upstream_check_fastcgi_params(ngx_conf_t *cf,
@@ -402,6 +401,13 @@ static ngx_command_t  ngx_http_upstream_check_commands[] = {
     { ngx_string("check_http_expect_alive"),
       NGX_HTTP_UPS_CONF|NGX_CONF_1MORE,
       ngx_http_upstream_check_http_expect_alive,
+      0,
+      0,
+      NULL },
+
+    { ngx_string("check_http_body"),
+      NGX_HTTP_UPS_CONF|NGX_CONF_TAKE1,
+      ngx_http_upstream_check_http_body,
       0,
       0,
       NULL },
@@ -547,7 +553,7 @@ static ngx_check_conf_t  ngx_check_types[] = {
       ngx_http_upstream_check_send_handler,
       ngx_http_upstream_check_recv_handler,
       ngx_http_upstream_check_http_init,
-      ngx_http_upstream_check_http_parse,
+      ngx_upstream_check_http_parse,
       ngx_http_upstream_check_http_reinit,
       1,
       1 },
@@ -1401,67 +1407,6 @@ ngx_http_upstream_check_http_init(ngx_upstream_check_peer_t *peer)
 
 
 static ngx_int_t
-ngx_http_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
-{
-    ngx_int_t                            rc;
-    ngx_uint_t                           code, code_n;
-    ngx_http_upstream_check_ctx_t       *ctx;
-    ngx_upstream_check_srv_conf_t  *ucscf;
-
-    ucscf = peer->conf;
-    ctx = peer->check_data;
-
-    if ((ctx->recv.last - ctx->recv.pos) > 0) {
-
-        rc = ngx_http_upstream_check_parse_status_line(ctx,
-                                                       &ctx->recv,
-                                                       &ctx->status);
-        if (rc == NGX_AGAIN) {
-            return rc;
-        }
-
-        if (rc == NGX_ERROR) {
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                          "http parse status line error with peer: %V ",
-                          &peer->check_peer_addr->name);
-            return rc;
-        }
-
-        code = ctx->status.code;
-
-        if (code >= 200 && code < 300) {
-            code_n = NGX_CHECK_HTTP_2XX;
-        } else if (code >= 300 && code < 400) {
-            code_n = NGX_CHECK_HTTP_3XX;
-        } else if (code >= 400 && code < 500) {
-            peer->pc.connection->error = 1;
-            code_n = NGX_CHECK_HTTP_4XX;
-        } else if (code >= 500 && code < 600) {
-            peer->pc.connection->error = 1;
-            code_n = NGX_CHECK_HTTP_5XX;
-        } else {
-            peer->pc.connection->error = 1;
-            code_n = NGX_CHECK_HTTP_ERR;
-        }
-
-        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0,
-                       "http_parse: code_n: %ui, conf: %ui",
-                       code_n, ucscf->code.status_alive);
-
-        if (code_n & ucscf->code.status_alive) {
-            return NGX_OK;
-        } else {
-            return NGX_ERROR;
-        }
-    } else {
-        return NGX_AGAIN;
-    }
-
-    return NGX_OK;
-}
-
-
-static ngx_int_t
 ngx_http_upstream_check_fastcgi_process_record(
     ngx_http_upstream_check_ctx_t *ctx, ngx_buf_t *b, ngx_http_status_t *status)
 {
@@ -1972,199 +1917,6 @@ done:
 header_done:
 
     b->pos = p + 1;
-    ctx->state = sw_start;
-
-    return NGX_OK;
-}
-
-
-static ngx_int_t
-ngx_http_upstream_check_parse_status_line(ngx_http_upstream_check_ctx_t *ctx,
-    ngx_buf_t *b, ngx_http_status_t *status)
-{
-    u_char ch, *p;
-    enum {
-        sw_start = 0,
-        sw_H,
-        sw_HT,
-        sw_HTT,
-        sw_HTTP,
-        sw_first_major_digit,
-        sw_major_digit,
-        sw_first_minor_digit,
-        sw_minor_digit,
-        sw_status,
-        sw_space_after_status,
-        sw_status_text,
-        sw_almost_done
-    } state;
-
-    state = ctx->state;
-
-    for (p = b->pos; p < b->last; p++) {
-        ch = *p;
-
-        switch (state) {
-
-        /* "HTTP/" */
-        case sw_start:
-            if (ch != 'H') {
-                return NGX_ERROR;
-            }
-
-            state = sw_H;
-            break;
-
-        case sw_H:
-            if (ch != 'T') {
-                return NGX_ERROR;
-            }
-
-            state = sw_HT;
-            break;
-
-        case sw_HT:
-            if (ch != 'T') {
-                return NGX_ERROR;
-            }
-
-            state = sw_HTT;
-            break;
-
-        case sw_HTT:
-            if (ch != 'P') {
-                return NGX_ERROR;
-            }
-
-            state = sw_HTTP;
-            break;
-
-        case sw_HTTP:
-            if (ch != '/') {
-                return NGX_ERROR;
-            }
-
-            state = sw_first_major_digit;
-            break;
-
-        /* the first digit of major HTTP version */
-        case sw_first_major_digit:
-            if (ch < '1' || ch > '9') {
-                return NGX_ERROR;
-            }
-
-            state = sw_major_digit;
-            break;
-
-        /* the major HTTP version or dot */
-        case sw_major_digit:
-            if (ch == '.') {
-                state = sw_first_minor_digit;
-                break;
-            }
-
-            if (ch < '0' || ch > '9') {
-                return NGX_ERROR;
-            }
-
-            break;
-
-        /* the first digit of minor HTTP version */
-        case sw_first_minor_digit:
-            if (ch < '0' || ch > '9') {
-                return NGX_ERROR;
-            }
-
-            state = sw_minor_digit;
-            break;
-
-        /* the minor HTTP version or the end of the request line */
-        case sw_minor_digit:
-            if (ch == ' ') {
-                state = sw_status;
-                break;
-            }
-
-            if (ch < '0' || ch > '9') {
-                return NGX_ERROR;
-            }
-
-            break;
-
-        /* HTTP status code */
-        case sw_status:
-            if (ch == ' ') {
-                break;
-            }
-
-            if (ch < '0' || ch > '9') {
-                return NGX_ERROR;
-            }
-
-            status->code = status->code * 10 + ch - '0';
-
-            if (++status->count == 3) {
-                state = sw_space_after_status;
-                status->start = p - 2;
-            }
-
-            break;
-
-        /* space or end of line */
-        case sw_space_after_status:
-            switch (ch) {
-            case ' ':
-                state = sw_status_text;
-                break;
-            case '.':                    /* IIS may send 403.1, 403.2, etc */
-                state = sw_status_text;
-                break;
-            case CR:
-                state = sw_almost_done;
-                break;
-            case LF:
-                goto done;
-            default:
-                return NGX_ERROR;
-            }
-            break;
-
-        /* any text until end of line */
-        case sw_status_text:
-            switch (ch) {
-            case CR:
-                state = sw_almost_done;
-
-                break;
-            case LF:
-                goto done;
-            }
-            break;
-
-        /* end of status line */
-        case sw_almost_done:
-            status->end = p - 1;
-            if (ch == LF) {
-                goto done;
-            } else {
-                return NGX_ERROR;
-            }
-        }
-    }
-
-    b->pos = p;
-    ctx->state = state;
-
-    return NGX_AGAIN;
-
-done:
-
-    b->pos = p + 1;
-
-    if (status->end == NULL) {
-        status->end = p;
-    }
-
     ctx->state = sw_start;
 
     return NGX_OK;
@@ -3218,6 +2970,22 @@ ngx_http_upstream_check_http_expect_alive(ngx_conf_t *cf, ngx_command_t *cmd,
     return NGX_CONF_OK;
 }
 
+static char *
+ngx_http_upstream_check_http_body(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf)
+{
+    ngx_str_t                           *value;
+    ngx_upstream_check_srv_conf_t  *ucscf;
+
+    value = cf->args->elts;
+
+    ucscf = ngx_http_conf_get_module_srv_conf(cf,
+                                              ngx_http_upstream_check_module);
+
+    ucscf->body = value[1];
+
+    return NGX_CONF_OK;
+}
 
 static char *
 ngx_http_upstream_check_shm_size(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
