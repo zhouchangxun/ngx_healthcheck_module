@@ -87,7 +87,8 @@ typedef struct {
 
 static ngx_int_t ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle);
 
-static ngx_int_t ngx_stream_upstream_check_peek_one_byte(ngx_connection_t *c);
+static ngx_int_t ngx_stream_upstream_check_peek_one_byte(
+        ngx_connection_t *c, ngx_upstream_check_peer_t *peer);
 
 static void ngx_stream_upstream_check_begin_handler(ngx_event_t *event);
 static void ngx_stream_upstream_check_connect_handler(ngx_event_t *event);
@@ -678,7 +679,7 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
 
     if (peer->pc.connection != NULL) {
         c = peer->pc.connection;
-        if ((rc = ngx_stream_upstream_check_peek_one_byte(c)) == NGX_OK) {
+        if ((rc = ngx_stream_upstream_check_peek_one_byte(c, peer)) == NGX_OK) {
             goto upstream_check_connect_done;
         } else {
             ngx_close_connection(c);
@@ -716,12 +717,14 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
     c->pool = peer->pool;
 
     /* (changxun): set sock opt "IP_RECVERR" in order to recv icmp error like host/port unreachable. */
+    /* note: we have invoke 'ngx_event_connect_peer() above. so the code we comment is not required.
     int val = 1;
     if( setsockopt( c->fd, SOL_IP, IP_RECVERR, &val, sizeof(val) ) == -1 ){
         ngx_log_error(NGX_LOG_ERR, event->log, 0,
               "setsockopt(IP_RECVERR) failed with peer: %V ",
               &peer->check_peer_addr->name);
     }
+    */
 
     upstream_check_connect_done:
     peer->state = NGX_HTTP_CHECK_CONNECT_DONE;
@@ -738,7 +741,8 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
 }
 
 static ngx_int_t
-ngx_stream_upstream_check_peek_one_byte(ngx_connection_t *c)
+ngx_stream_upstream_check_peek_one_byte(ngx_connection_t *c,
+                                        ngx_upstream_check_peer_t *peer) 
 {
     char                            buf[1];
     ngx_int_t                       n;
@@ -747,14 +751,14 @@ ngx_stream_upstream_check_peek_one_byte(ngx_connection_t *c)
     n = recv(c->fd, buf, 1, MSG_PEEK);
     err = ngx_socket_errno;
 
-    ngx_log_error(NGX_LOG_INFO, c->log, err,
-                   "[ngx-healthcheck][stream] when recv one byte,"
-                   " recv(): %i, fd: %d",
-                   n, c->fd);
-
     if (n == 1 || (n == -1 && err == NGX_EAGAIN)) {
         return NGX_OK;
     } else {
+        ngx_log_error(NGX_LOG_WARN, c->log, err,
+                      "[ngx-healthcheck][stream] when peek one byte,"
+                      " recv(): %i, fd: %d. peer: %V",
+                      n, c->fd, &peer->check_peer_addr->name);
+
         return NGX_ERROR;
     }
 }
@@ -772,7 +776,7 @@ ngx_stream_upstream_check_peek_handler(ngx_event_t *event)
     c = event->data;
     peer = c->data;
 
-    if (ngx_stream_upstream_check_peek_one_byte(c) == NGX_OK) {
+    if (ngx_stream_upstream_check_peek_one_byte(c, peer) == NGX_OK) {
         ngx_stream_upstream_check_status_update(peer, 1); //up
 
     } else {
