@@ -48,7 +48,7 @@ Key features:
 - Supports health detection for both four-tier and seven-tier back-end servers
 - Four-layer supported detection type: `tcp` / `udp` / `http`
 - Seven-layer supported detection Type: `http` / `fastcgi`
-- Provide a unified http status query interface, output format: `html` / `json` / `csv`
+- Provide a unified http status query interface, output format: `html` / `json` / `csv` / `prometheus`
 
 Installation
 ============
@@ -140,7 +140,7 @@ stream {
 
 **status interface**
 
-One typical output is
+One typical output is(json format)
 ``` python
 root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# curl localhost/status
 {"servers": {
@@ -157,6 +157,47 @@ root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# curl localhost/status
     {"index": 3, "upstream": "udp-cluster", "name": "8.8.8.8:53", "status": "up", "rise": 3, "fall": 0, "type": "udp", "port": 0}
   ]
 }}
+root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# 
+```
+or (prometheus format)
+``` python
+root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# curl localhost/status
+# HELP nginx_upstream_count_total Nginx total number of servers
+# TYPE nginx_upstream_count_total gauge
+nginx_upstream_count_total 6
+# HELP nginx_upstream_count_up Nginx total number of servers that are UP
+# TYPE nginx_upstream_count_up gauge
+nginx_upstream_count_up 0
+# HELP nginx_upstream_count_down Nginx total number of servers that are DOWN
+# TYPE nginx_upstream_count_down gauge
+nginx_upstream_count_down 6
+# HELP nginx_upstream_count_generation Nginx generation
+# TYPE nginx_upstream_count_generation gauge
+nginx_upstream_count_generation 1
+# HELP nginx_upstream_server_rise Nginx rise counter
+# TYPE nginx_upstream_server_rise counter
+nginx_upstream_server_rise{index="0",upstream_type="http",upstream="http-cluster",name="127.0.0.1:8082",status="down",type="http",port="0"} 0
+nginx_upstream_server_rise{index="1",upstream_type="http",upstream="http-cluster",name="127.0.0.2:8082",status="down",type="http",port="0"} 0
+nginx_upstream_server_rise{index="1",upstream_type="stream",upstream="tcp-cluster",name="192.168.0.2:22",status="down",type="tcp",port="0"} 0
+nginx_upstream_server_rise{index="2",upstream_type="stream",upstream="udp-cluster",name="127.0.0.1:5432",status="down",type="udp",port="0"} 0
+nginx_upstream_server_rise{index="4",upstream_type="stream",upstream="http-cluster2",name="127.0.0.1:8082",status="down",type="http",port="0"} 0
+nginx_upstream_server_rise{index="5",upstream_type="stream",upstream="http-cluster2",name="127.0.0.2:8082",status="down",type="http",port="0"} 0
+# HELP nginx_upstream_server_fall Nginx fall counter
+# TYPE nginx_upstream_server_fall counter
+nginx_upstream_server_fall{index="0",upstream_type="http",upstream="http-cluster",name="127.0.0.1:8082",status="down",type="http",port="0"} 41
+nginx_upstream_server_fall{index="1",upstream_type="http",upstream="http-cluster",name="127.0.0.2:8082",status="down",type="http",port="0"} 42
+nginx_upstream_server_fall{index="1",upstream_type="stream",upstream="tcp-cluster",name="192.168.0.2:22",status="down",type="tcp",port="0"} 14
+nginx_upstream_server_fall{index="2",upstream_type="stream",upstream="udp-cluster",name="127.0.0.1:5432",status="down",type="udp",port="0"} 40
+nginx_upstream_server_fall{index="4",upstream_type="stream",upstream="http-cluster2",name="127.0.0.1:8082",status="down",type="http",port="0"} 40
+nginx_upstream_server_fall{index="5",upstream_type="stream",upstream="http-cluster2",name="127.0.0.2:8082",status="down",type="http",port="0"} 43
+# HELP nginx_upstream_server_active Nginx active 1 for UP / 0 for DOWN
+# TYPE nginx_upstream_server_active gauge
+nginx_upstream_server_active{index="0",upstream_type="http",upstream="http-cluster",name="127.0.0.1:8082",type="http",port="0"} 0
+nginx_upstream_server_active{index="1",upstream_type="http",upstream="http-cluster",name="127.0.0.2:8082",type="http",port="0"} 0
+nginx_upstream_server_active{index="1",upstream_type="stream",upstream="tcp-cluster",name="192.168.0.2:22",type="tcp",port="0"} 0
+nginx_upstream_server_active{index="2",upstream_type="stream",upstream="udp-cluster",name="127.0.0.1:5432",type="udp",port="0"} 0
+nginx_upstream_server_active{index="4",upstream_type="stream",upstream="http-cluster2",name="127.0.0.1:8082",type="http",port="0"} 0
+nginx_upstream_server_active{index="5",upstream_type="stream",upstream="http-cluster2",name="127.0.0.2:8082",type="http",port="0"} 0
 root@changxun-PC:~/nginx-dev/ngx_healthcheck_module# 
 ```
 
@@ -210,7 +251,7 @@ stream {
 healthcheck
 -----------
 
-`Syntax`: healthcheck_status [html|csv|json]
+`Syntax`: healthcheck_status [html|csv|json|prometheus]
 
 `Default`: healthcheck_status html
 
@@ -242,6 +283,8 @@ format. You can do like this:
 
  /status?format=json
 
+ /status?format=prometheus
+
 At present, you can fetch the list of servers with the same status by
 the argument of `status`. For example:
 
@@ -250,6 +293,8 @@ the argument of `status`. For example:
  /status?format=html&status=down
 
  /status?format=csv&status=up
+
+ /status?format=prometheus&status=up
 
 
 [Back to TOC](#table-of-contents)
