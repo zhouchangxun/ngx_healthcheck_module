@@ -2,6 +2,7 @@
 worker_processes  1;
 error_log  logs/error.log  info;
 #error_log  logs/debug_stream.log  debug_stream;
+error_log  logs/debug_http.log  debug_http;
 #pid        logs/nginx.pid;
 
 events {
@@ -48,6 +49,8 @@ http {
         check interval=3000 rise=2 fall=5 timeout=5000 type=http;
         check_http_send "GET /heartbeat HTTP/1.0\r\n\r\n";
         check_http_expect_alive http_2xx http_3xx;
+        # I just wanna enable servers whose response content contain ('server1' or 'server3') and 'UP'
+        check_http_expect_body ~ "server[13].+UP";
     }
 }
 
@@ -57,6 +60,7 @@ stream {
         server 127.0.0.1:22; # nomarl
         server 192.168.0.2:22;
         check interval=3000 rise=2 fall=5 timeout=5000 default_down=true type=tcp;
+        #check_http_send "UDP_TEST";
     }
     upstream udp-cluster {
         # simple round-robin
@@ -77,5 +81,7 @@ stream {
         # when use keepalive, you must use HTTP/1.1 with Host like above, or use HTTP/1.0 with header 'Connection: Keep-Alive'
         check_keepalive_requests 10;
         check_http_expect_alive http_2xx http_3xx;
+        # I just wanna enable servers whose response content contain ('server1' or 'server3') and 'UP'
+        check_http_expect_body ~ "server[13].+UP";
     }
 }

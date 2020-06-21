@@ -3,7 +3,8 @@
 
 #include <nginx.h>
 #include <ngx_core.h>
-
+#include <ngx_http.h>
+#include <ngx_regex.h>
 
 typedef struct ngx_upstream_check_peer_s ngx_upstream_check_peer_t;
 typedef struct ngx_upstream_check_srv_conf_s ngx_upstream_check_srv_conf_t;
@@ -52,6 +53,7 @@ struct ngx_upstream_check_srv_conf_s {
         ngx_uint_t                           return_code;
         ngx_uint_t                           status_alive;
     } code;
+    ngx_regex_t                             *expect_body_regex;
     ngx_array_t                             *fastcgi_params; //only for http module.
     ngx_uint_t                               default_down;
 };
