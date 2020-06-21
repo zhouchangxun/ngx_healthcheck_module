@@ -49,6 +49,8 @@ Key features:
 - Four-layer supported detection type: `tcp` / `udp` / `http`
 - Seven-layer supported detection Type: `http` / `fastcgi`
 - Provide a unified http status query interface, output format: `html` / `json` / `csv` / `prometheus`
+- Provide a unified http status query interface, output format: `html` / `json` / `csv` / `prometheus`
+- Support judge status according to http response code or body like `check_http_expect_body ~ ".+OK.+";`
 
 Installation
 ============

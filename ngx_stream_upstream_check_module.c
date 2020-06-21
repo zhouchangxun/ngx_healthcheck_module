@@ -3,15 +3,17 @@
  * desc: stream upstream server health check.
  */
 
-
-#include <nginx.h>
-#include <ngx_core.h>
-#include <ngx_stream.h>
-#include <ngx_http.h>
-
-#include "ngx_stream_upstream_check_module.h"
 #include "common.h.in"
+#include "ngx_stream_upstream_check_module.h"
 
+#define LOG_LEVEL NGX_LOG_DEBUG_STREAM
+#define MODULE_NAME "[ngx_healthcheck:stream]"
+
+ngx_int_t ngx_upstream_check_http_body_regex(
+    ngx_conf_t *cf, ngx_upstream_check_srv_conf_t  *ucscf,
+    ngx_str_t *regex, ngx_uint_t caseless);
+ngx_int_t ngx_upstream_check_http_parse_status_line(
+    ngx_buf_t *b, ngx_uint_t *pstate, ngx_http_status_t *status);
 
 typedef struct {
     ngx_buf_t                                send;
@@ -105,9 +107,7 @@ static ngx_int_t ngx_stream_upstream_check_http_init(
         ngx_upstream_check_peer_t *peer);
 static ngx_int_t ngx_stream_upstream_check_http_parse(
         ngx_upstream_check_peer_t *peer);
-static ngx_int_t ngx_stream_upstream_check_parse_status_line(
-        ngx_stream_upstream_check_ctx_t *ctx, ngx_buf_t *b,
-        ngx_http_status_t *status);
+
 static void ngx_stream_upstream_check_http_reinit(
         ngx_upstream_check_peer_t *peer);
 
@@ -139,7 +139,8 @@ static char *ngx_stream_upstream_check_http_send(ngx_conf_t *cf,
                                                  ngx_command_t *cmd, void *conf);
 static char *ngx_stream_upstream_check_http_expect_alive(ngx_conf_t *cf,
                                                          ngx_command_t *cmd, void *conf);
-
+static char *ngx_upstream_check_http_body(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf);
 
 static char *ngx_stream_upstream_check_shm_size(ngx_conf_t *cf,
                                                 ngx_command_t *cmd, void *conf);
@@ -213,6 +214,12 @@ static ngx_command_t  ngx_stream_upstream_check_commands[] = {
           0,
           NULL },
 
+        { ngx_string("check_http_expect_body"),
+          NGX_STREAM_UPS_CONF|NGX_CONF_TAKE2,
+          ngx_upstream_check_http_body,
+          0,
+          0,
+          NULL },
 
         { ngx_string("check_shm_size"),
           NGX_STREAM_MAIN_CONF|NGX_CONF_TAKE1,
@@ -319,7 +326,7 @@ ngx_stream_upstream_check_add_peer(ngx_conf_t *cf,
     ngx_stream_upstream_check_main_conf_t  *ucmcf;
 
     ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
-                      "[ngx-healthcheck][stream][api] add a peer:( %V ) to health check list.",
+                      "[api] add a peer:( %V ) to health check list.",
                       &peer_addr->name);
 
     if (us->srv_conf == NULL) {
@@ -505,20 +512,20 @@ ngx_stream_upstream_check_add_timers(ngx_cycle_t *cycle)
     peers = stream_peers_ctx;
     if (peers == NULL) {
         ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
-                     "[ngx-healthcheck][stream][timers] no stream section, skip init");
+                     "[timers] no stream section, skip init");
         return NGX_OK;
     }
 
     peers_shm = peers->peers_shm;
     if (peers_shm == NULL) {
         ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
-                     "[ngx-healthcheck][stream][timers][when init process]"
+                     "[timers][when init process]"
                      "no peers, so skip add timers");
         return NGX_OK;
     }
 
     ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
-                   "[ngx-healthcheck][stream][timers][when init process]"
+                   "[timers][when init process]"
                    "start check-timer for %ud peers",
                    peers->peers.nelts);
 
@@ -598,8 +605,8 @@ ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
     ucscf = peer->conf;
 
     if (ngx_stream_upstream_check_need_exit()) {
-        ngx_log_error(NGX_LOG_NOTICE, event->log, 0,
-                   "[ngx-healthcheck][stream][check-handler][when begin check]"
+        ngx_log_error(NGX_LOG_NOTICE, event->log, 0, MODULE_NAME
+                   "[check-handler][when begin check]"
                    "recv exit signal, skip current check for peer:(%V)", 
                    &peer->check_peer_addr->name);
         return;
@@ -614,8 +621,8 @@ ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
     }
 
     interval = ngx_current_msec - peer->shm->access_time;
-    ngx_log_debug6(NGX_LOG_DEBUG_STREAM, event->log, 0,
-                   "stream check begin handler for (%V): index: %ui, owner: %P, "
+    ngx_log_debug6(LOG_LEVEL, event->log, 0, MODULE_NAME
+                   "check begin handler for (%V): index: %ui, owner: %P, "
                            "ngx_pid: %P, current interval: %M, check_interval: %M",
                    &peer->check_peer_addr->name, peer->index, peer->shm->owner,
                    ngx_pid, interval,
@@ -649,8 +656,8 @@ ngx_stream_upstream_check_begin_handler(ngx_event_t *event)
     ngx_shmtx_unlock(&peer->shm->mutex);
 
     if (peer->shm->owner == ngx_pid) {
-        ngx_log_error(NGX_LOG_INFO, event->log, 0,
-                   "[ngx-healthcheck][stream][check-event][when begin check]"
+        ngx_log_debug(LOG_LEVEL, event->log, 0, MODULE_NAME
+                   "[check-event][when begin check]"
                    "restart a check for peer:(%V)", 
                    &peer->check_peer_addr->name);
         ngx_stream_upstream_check_connect_handler(event);
@@ -670,8 +677,8 @@ ngx_stream_upstream_check_connect_handler(ngx_event_t *event)
     ucscf = peer->conf;
 
     if (ngx_stream_upstream_check_need_exit()) {
-        ngx_log_error(NGX_LOG_NOTICE, event->log, 0,
-                   "[ngx-healthcheck][stream][check-handler][when connect peer]"
+        ngx_log_error(NGX_LOG_NOTICE, event->log, 0, MODULE_NAME
+                   "[check-handler][when connect peer]"
                    "recv exit signal, skip current check for peer:(%V)", 
                    &peer->check_peer_addr->name);
         return;
@@ -754,9 +761,8 @@ ngx_stream_upstream_check_peek_one_byte(ngx_connection_t *c,
     if (n == 1 || (n == -1 && err == NGX_EAGAIN)) {
         return NGX_OK;
     } else {
-        ngx_log_error(NGX_LOG_WARN, c->log, err,
-                      "[ngx-healthcheck][stream] when peek one byte,"
-                      " recv(): %i, fd: %d. peer: %V",
+        ngx_log_error(NGX_LOG_WARN, c->log, err, MODULE_NAME
+                      "when peek one byte, recv(): %i, fd: %d. peer: %V",
                       n, c->fd, &peer->check_peer_addr->name);
 
         return NGX_ERROR;
@@ -800,7 +806,7 @@ ngx_stream_upstream_check_discard_handler(ngx_event_t *event)
 
     c = event->data;
 
-    ngx_log_debug0(NGX_LOG_DEBUG_STREAM, c->log, 0,
+    ngx_log_debug0(LOG_LEVEL, c->log, 0, MODULE_NAME
                    "upstream check discard handler");
 
     if (ngx_stream_upstream_check_need_exit()) {
@@ -820,7 +826,7 @@ ngx_stream_upstream_check_discard_handler(ngx_event_t *event)
 
         } else {
             if (size == 0) {
-                ngx_log_debug0(NGX_LOG_DEBUG_STREAM, c->log, 0,
+                ngx_log_debug0(LOG_LEVEL, c->log, 0, MODULE_NAME
                                "peer closed its half side of the connection");
             }
 
@@ -862,12 +868,12 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
     c = event->data;
     peer = c->data;
 
-    ngx_log_error(NGX_LOG_INFO, c->log, 0,
-                     "[ngx-healthcheck][stream][send-handler] for peer:%V",
+    ngx_log_debug(LOG_LEVEL, c->log, 0, MODULE_NAME
+                     "[send-handler] for peer:%V",
                      &peer->check_peer_addr->name);
 
     if (c->pool == NULL) {
-        ngx_log_error(NGX_LOG_ERR, event->log, 0,
+        ngx_log_error(NGX_LOG_ERR, event->log, 0, MODULE_NAME
                       "check pool NULL with peer: %V ",
                       &peer->check_peer_addr->name);
 
@@ -877,7 +883,7 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
     if (peer->state != NGX_HTTP_CHECK_CONNECT_DONE) {
         if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
 
-            ngx_log_error(NGX_LOG_ERR, event->log, 0,
+            ngx_log_error(NGX_LOG_ERR, event->log, 0, MODULE_NAME
                           "check handle write event error with peer: %V ",
                           &peer->check_peer_addr->name);
 
@@ -897,7 +903,7 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
 
         if (peer->init == NULL || peer->init(peer) != NGX_OK) {
 
-            ngx_log_error(NGX_LOG_ERR, event->log, 0,
+            ngx_log_error(NGX_LOG_ERR, event->log, 0, MODULE_NAME
                           "check init error with peer: %V ",
                           &peer->check_peer_addr->name);
 
@@ -915,8 +921,8 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
         ngx_err_t  err;
 
         err = (size >=0) ? 0 : ngx_socket_errno;
-        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, err,
-                       "[ngx-healthcheck][stream][send-handler]" 
+        ngx_log_debug(LOG_LEVEL, ngx_cycle->log, err, MODULE_NAME
+                       "[send-handler]" 
                        "send check data size: %z, total: %z for peer:%V",
                        size, ctx->send.last - ctx->send.pos, &peer->check_peer_addr->name);
         }
@@ -932,8 +938,8 @@ ngx_stream_upstream_check_send_handler(ngx_event_t *event)
     }
 
     if (ctx->send.pos == ctx->send.last) {
-        ngx_log_error(NGX_LOG_INFO, c->log, 0,
-                     "[ngx-healthcheck][stream][send-handler] send finish for peer:%V",
+        ngx_log_debug(LOG_LEVEL, c->log, 0, MODULE_NAME
+                     "[send-handler] send finish for peer:%V",
                      &peer->check_peer_addr->name);
         peer->state = NGX_HTTP_CHECK_SEND_DONE;
         c->requests++;
@@ -1013,8 +1019,8 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
         ngx_err_t  err;
 
         err = (size >= 0) ? 0 : ngx_socket_errno;
-        ngx_log_debug2(NGX_LOG_DEBUG_STREAM, c->log, err,
-                       "stream check recv size: %z, peer: %V ",
+        ngx_log_debug2(LOG_LEVEL, c->log, err, MODULE_NAME
+                       "check recv size: %z, peer: %V ",
                        size, &peer->check_peer_addr->name);
         }
 #endif
@@ -1032,8 +1038,8 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
 
     rc = peer->parse(peer);
 
-    ngx_log_debug2(NGX_LOG_DEBUG_STREAM, c->log, 0,
-                   "stream check parse rc: %i, peer: %V ",
+    ngx_log_debug2(LOG_LEVEL, c->log, 0, MODULE_NAME
+                   "check parse rc: %i, peer: %V ",
                    rc, &peer->check_peer_addr->name);
 
     switch (rc) {
@@ -1049,7 +1055,7 @@ ngx_stream_upstream_check_recv_handler(ngx_event_t *event)
             return;
 
         case NGX_ERROR:
-            ngx_log_error(NGX_LOG_ERR, event->log, 0,
+            ngx_log_error(NGX_LOG_ERR, event->log, 0, MODULE_NAME
                           "check protocol %V error with peer: %V ",
                           &peer->conf->check_type_conf->name,
                           &peer->check_peer_addr->name);
@@ -1097,8 +1103,7 @@ ngx_stream_upstream_check_http_init(ngx_upstream_check_peer_t *peer)
     return NGX_OK;
 }
 
-
-static ngx_int_t
+ngx_int_t
 ngx_stream_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
 {
     ngx_int_t                            rc;
@@ -1111,15 +1116,15 @@ ngx_stream_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
 
     if ((ctx->recv.last - ctx->recv.pos) > 0) {
 
-        rc = ngx_stream_upstream_check_parse_status_line(ctx,
-                                                         &ctx->recv,
-                                                         &ctx->status);
+        rc = ngx_upstream_check_http_parse_status_line(&ctx->recv,
+                                                       &ctx->state,
+                                                       &ctx->status);
         if (rc == NGX_AGAIN) {
             return rc;
         }
 
         if (rc == NGX_ERROR) {
-            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+            ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, MODULE_NAME
                           "http parse status line error with peer: %V ",
                           &peer->check_peer_addr->name);
             return rc;
@@ -1142,211 +1147,66 @@ ngx_stream_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
             code_n = NGX_CHECK_HTTP_ERR;
         }
 
-        ngx_log_debug2(NGX_LOG_DEBUG_STREAM, ngx_cycle->log, 0,
-                       "http_parse: code_n: %ui, conf: %ui",
-                       code_n, ucscf->code.status_alive);
+        // find content length from [Content-Length: (\d+)\r]
+        *ctx->status.end = '\0';
+        u_char * content_len_start = (u_char *)ngx_strstr(ctx->status.start, "Content-Length:");
+        u_char * content_len_end = NULL;
+        ngx_uint_t found_body_len, body_len = 0;
+        if (content_len_start != NULL) {
+            content_len_end = ngx_strlchr(content_len_start, ctx->status.end, '\r');
+            if (content_len_end != NULL) {
+                found_body_len = 1;
+                ngx_str_t content_len_line = {content_len_end-content_len_start, content_len_start};
+                body_len = ngx_atoi(content_len_line.data + sizeof("Content-Length: ")-1,
+                                    content_len_line.len - (sizeof("Content-Length: ")-1));
+                ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, MODULE_NAME
+                              "[http-response-parse]: found content-length: [%V],value: %ui",
+                              &content_len_line, body_len);
+            }
+        }
 
-        if (code_n & ucscf->code.status_alive) {
-            return NGX_OK;
-        } else {
+        ngx_str_t response_body = {ctx->recv.last - ctx->recv.pos, ctx->recv.pos};
+
+        ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                "[http-response-parse]: "
+                "code: %ui, expect code mask: %ui. "
+                "received body len: %ui, content:[%V]",
+                code, ucscf->code.status_alive,
+                response_body.len, &response_body);
+
+        if (!(code_n & ucscf->code.status_alive)) {
+            ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                          "[http-response-parse]: code not matched");
             return NGX_ERROR;
+        } else if (ucscf->expect_body_regex != NGX_CONF_UNSET_PTR) {
+            if (found_body_len == 1 && response_body.len < body_len) {
+                return NGX_AGAIN;
+            }
+            /* body check */
+            ngx_int_t n;
+            n = ngx_regex_exec(ucscf->expect_body_regex, &response_body, NULL, 0);
+            if (n == NGX_REGEX_NO_MATCHED) {
+                if (found_body_len == 1) {
+                    ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                                  "[http-response-parse]: body not matched");
+                    return NGX_ERROR;
+                } else {
+                    /* we don't known the end flag, so we have to wait next match util timeout */
+                    return NGX_AGAIN;
+                }
+            } else {
+                ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                              "[http-response-parse]: body matched");
+                return NGX_OK;
+            }
+        } else {
+            ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                          "[http-response-parse]: code matched");
+            return NGX_OK;
         }
     } else {
         return NGX_AGAIN;
     }
-
-    return NGX_OK;
-}
-
-
-static ngx_int_t
-ngx_stream_upstream_check_parse_status_line(ngx_stream_upstream_check_ctx_t *ctx,
-                                            ngx_buf_t *b, ngx_http_status_t *status)
-{
-    u_char ch, *p;
-    enum {
-        sw_start = 0,
-        sw_H,
-        sw_HT,
-        sw_HTT,
-        sw_HTTP,
-        sw_first_major_digit,
-        sw_major_digit,
-        sw_first_minor_digit,
-        sw_minor_digit,
-        sw_status,
-        sw_space_after_status,
-        sw_status_text,
-        sw_almost_done
-    } state;
-
-    state = ctx->state;
-
-    for (p = b->pos; p < b->last; p++) {
-        ch = *p;
-
-        switch (state) {
-
-            /* "HTTP/" */
-            case sw_start:
-                if (ch != 'H') {
-                    return NGX_ERROR;
-                }
-
-                state = sw_H;
-                break;
-
-            case sw_H:
-                if (ch != 'T') {
-                    return NGX_ERROR;
-                }
-
-                state = sw_HT;
-                break;
-
-            case sw_HT:
-                if (ch != 'T') {
-                    return NGX_ERROR;
-                }
-
-                state = sw_HTT;
-                break;
-
-            case sw_HTT:
-                if (ch != 'P') {
-                    return NGX_ERROR;
-                }
-
-                state = sw_HTTP;
-                break;
-
-            case sw_HTTP:
-                if (ch != '/') {
-                    return NGX_ERROR;
-                }
-
-                state = sw_first_major_digit;
-                break;
-
-                /* the first digit of major HTTP version */
-            case sw_first_major_digit:
-                if (ch < '1' || ch > '9') {
-                    return NGX_ERROR;
-                }
-
-                state = sw_major_digit;
-                break;
-
-                /* the major HTTP version or dot */
-            case sw_major_digit:
-                if (ch == '.') {
-                    state = sw_first_minor_digit;
-                    break;
-                }
-
-                if (ch < '0' || ch > '9') {
-                    return NGX_ERROR;
-                }
-
-                break;
-
-                /* the first digit of minor HTTP version */
-            case sw_first_minor_digit:
-                if (ch < '0' || ch > '9') {
-                    return NGX_ERROR;
-                }
-
-                state = sw_minor_digit;
-                break;
-
-                /* the minor HTTP version or the end of the request line */
-            case sw_minor_digit:
-                if (ch == ' ') {
-                    state = sw_status;
-                    break;
-                }
-
-                if (ch < '0' || ch > '9') {
-                    return NGX_ERROR;
-                }
-
-                break;
-
-                /* HTTP status code */
-            case sw_status:
-                if (ch == ' ') {
-                    break;
-                }
-
-                if (ch < '0' || ch > '9') {
-                    return NGX_ERROR;
-                }
-
-                status->code = status->code * 10 + ch - '0';
-
-                if (++status->count == 3) {
-                    state = sw_space_after_status;
-                    status->start = p - 2;
-                }
-
-                break;
-
-                /* space or end of line */
-            case sw_space_after_status:
-                switch (ch) {
-                    case ' ':
-                        state = sw_status_text;
-                        break;
-                    case '.':                    /* IIS may send 403.1, 403.2, etc */
-                        state = sw_status_text;
-                        break;
-                    case CR:
-                        state = sw_almost_done;
-                        break;
-                    case LF:
-                        goto done;
-                    default:
-                        return NGX_ERROR;
-                }
-                break;
-
-                /* any text until end of line */
-            case sw_status_text:
-                switch (ch) {
-                    case CR:
-                        state = sw_almost_done;
-
-                        break;
-                    case LF:
-                        goto done;
-                }
-                break;
-
-                /* end of status line */
-            case sw_almost_done:
-                status->end = p - 1;
-                if (ch == LF) {
-                    goto done;
-                } else {
-                    return NGX_ERROR;
-                }
-        }
-    }
-
-    b->pos = p;
-    ctx->state = state;
-
-    return NGX_AGAIN;
-
-    done:
-
-    b->pos = p + 1;
-
-    if (status->end == NULL) {
-        status->end = p;
-    }
-
-    ctx->state = sw_start;
 
     return NGX_OK;
 }
@@ -1383,8 +1243,8 @@ ngx_stream_upstream_check_status_update(ngx_upstream_check_peer_t *peer,
         peer->shm->fall_count = 0;
         if (peer->shm->down && peer->shm->rise_count >= ucscf->rise_count) {
             peer->shm->down = 0;
-            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
-                          "[ngx-healthcheck][stream][status-update]"
+            ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, MODULE_NAME
+                          "[status-update]"
                           " change status to UP for peer: %V ",
                           &peer->check_peer_addr->name);
         }
@@ -1393,8 +1253,8 @@ ngx_stream_upstream_check_status_update(ngx_upstream_check_peer_t *peer,
         peer->shm->fall_count++;
         if (!peer->shm->down && peer->shm->fall_count >= ucscf->fall_count) {
             peer->shm->down = 1;
-            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
-                          "[ngx-healthcheck][stream][status-update]"
+            ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, MODULE_NAME
+                          "[status-update]"
                           " change status to DOWN for peer: %V ",
                           &peer->check_peer_addr->name);
         }
@@ -1416,8 +1276,8 @@ ngx_stream_upstream_check_clean_event(ngx_upstream_check_peer_t *peer)
     cf = ucscf->check_type_conf;
 
     if (c) {
-        ngx_log_debug2(NGX_LOG_DEBUG_STREAM, c->log, 0,
-                       "stream check clean event: index:%i, fd: %d",
+        ngx_log_debug2(LOG_LEVEL, c->log, 0, MODULE_NAME
+                       "check clean event: index:%i, fd: %d",
                        peer->index, c->fd);
         if (c->error == 0 &&
             cf->need_keepalive &&
@@ -1459,18 +1319,16 @@ ngx_stream_upstream_check_timeout_handler(ngx_event_t *event)
     if(peer->pc.type == SOCK_STREAM){
         peer->pc.connection->error = 1;
     
-        ngx_log_error(NGX_LOG_ERR, event->log, 0,
-              "[ngx-healthcheck][stream][timers][timeout]"
-              "tcp check time out with peer: %V ,set it down.",
+        ngx_log_error(NGX_LOG_WARN, event->log, 0, MODULE_NAME
+              "[timer]tcp check time out with peer: %V ,set it down.",
               &peer->check_peer_addr->name);
     
         ngx_stream_upstream_check_status_update(peer, 0);
     }else if(peer->pc.type == SOCK_DGRAM){
         peer->pc.connection->error = 0;
     
-        ngx_log_error(NGX_LOG_INFO, event->log, 0,
-              "[ngx-healthcheck][stream][timers][timeout]"
-              "udp check time out with peer: %V, we assum it's up :) ",
+        ngx_log_error(NGX_LOG_NOTICE, event->log, 0, MODULE_NAME
+              "[timer]udp check time out with peer: %V, we assum it's up :) ",
               &peer->check_peer_addr->name);
     
         ngx_stream_upstream_check_status_update(peer, 1);
@@ -1515,7 +1373,7 @@ ngx_stream_upstream_check_clear_all_events()
         return;
     }
 
-    ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0,
+    ngx_log_error(NGX_LOG_NOTICE, ngx_cycle->log, 0, MODULE_NAME
                   "clear all the events on %P ", ngx_pid);
 
     has_cleared = 1;
@@ -1706,7 +1564,7 @@ ngx_stream_upstream_check(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     ngx_conf_log_error(NGX_LOG_NOTICE /* current level always it */, cf, 0,
-                       "[ngx-healthcheck][stream][directive] found check arg:"
+                       "[directive] found check arg:"
                        "[port:%d,interval:%d,timeout:%d,fall:%d,rise:%d,default_down:%d]", 
                        port,interval,timeout,rise,default_down);
     return NGX_CONF_OK;
@@ -1814,6 +1672,47 @@ ngx_stream_upstream_check_http_expect_alive(ngx_conf_t *cf, ngx_command_t *cmd,
     return NGX_CONF_OK;
 }
 
+static char *
+ngx_upstream_check_http_body(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf)
+{
+    ngx_upstream_check_srv_conf_t  *ucscf;
+    u_char                    *mod;
+    size_t                     len;
+    ngx_str_t                 *value, *name;
+    value = cf->args->elts;
+
+    ucscf = ngx_stream_conf_get_module_srv_conf(cf,
+                                              ngx_stream_upstream_check_module);
+
+    if (cf->args->nelts != 3) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "2 args required.");
+            return NGX_CONF_ERROR;
+    }
+    len = value[1].len;
+    mod = value[1].data;
+    name = &value[2];
+
+    if (len == 1 && mod[0] == '~') {
+        if (ngx_upstream_check_http_body_regex(cf, ucscf, name, 0) != NGX_OK) {
+            return NGX_CONF_ERROR;
+        }
+
+    } else if (len == 2 && mod[0] == '~' && mod[1] == '*') {
+
+        if (ngx_upstream_check_http_body_regex(cf, ucscf, name, 1) != NGX_OK) {
+            return NGX_CONF_ERROR;
+        }
+
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                            "invalid mode args \"%V\", must be ~ or ~* ", &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
 
 static char *
 ngx_stream_upstream_check_shm_size(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
@@ -1878,8 +1777,8 @@ ngx_stream_upstream_check_init_main_conf(ngx_conf_t *cf, void *conf)
 
     uscfp = umcf->upstreams.elts;
 
-    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0,
-                       "[ngx-healthcheck][stream] when init main conf. upstreams num:%ui", 
+    ngx_log_error(NGX_LOG_NOTICE, cf->log, 0, MODULE_NAME
+                       " when init main conf. upstreams num:%ui", 
                        umcf->upstreams.nelts);
     for (i = 0; i < umcf->upstreams.nelts; i++) {
 
@@ -1908,6 +1807,7 @@ ngx_stream_upstream_check_create_srv_conf(ngx_conf_t *cf)
     ucscf->check_timeout = NGX_CONF_UNSET_MSEC;
     ucscf->check_keepalive_requests = NGX_CONF_UNSET_UINT;
     ucscf->check_type_conf = NGX_CONF_UNSET_PTR;
+    ucscf->expect_body_regex = NGX_CONF_UNSET_PTR;
 
     return ucscf;
 }
@@ -1948,6 +1848,7 @@ ngx_stream_upstream_check_init_srv_conf(ngx_conf_t *cf, void *conf)
     if (ucscf->check_keepalive_requests == NGX_CONF_UNSET_UINT) {
         ucscf->check_keepalive_requests = 1;
     }
+
     if (ucscf->check_type_conf == NGX_CONF_UNSET_PTR) {
         ucscf->check_type_conf = NULL;
     } else {
@@ -1975,8 +1876,8 @@ ngx_stream_upstream_check_init_shm(ngx_conf_t *cf, void *conf)
     ngx_shm_zone_t                       *shm_zone;
     ngx_stream_upstream_check_main_conf_t  *ucmcf = conf;
 
-    ngx_log_error(NGX_LOG_INFO, cf->log, 0,
-                       "[ngx-healthcheck][stream][init conf] init shm, total peers num:%ui", 
+    ngx_log_debug(LOG_LEVEL, cf->log, 0, MODULE_NAME
+                       "[init conf] init shm, total peers num:%ui", 
                        ucmcf->peers->peers.nelts); 
     if (1||(ucmcf->peers->peers.nelts > 0)) {
 
@@ -2053,8 +1954,8 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     same = 0;
 
 
-    ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
-                  "[ngx-healthcheck][stream][shm_zone] init callback");
+    ngx_log_debug(LOG_LEVEL, shm_zone->shm.log, 0, MODULE_NAME
+                  "[shm_zone] init callback");
 
     peers = stream_peers_ctx;
     if (peers == NULL) {
@@ -2085,8 +1986,8 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     // end 
 
     if (data) {// ozone.data
-        ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
-                  "[ngx-healthcheck][stream][shm_zone] found old shm");
+        ngx_log_debug(LOG_LEVEL, shm_zone->shm.log, 0, MODULE_NAME
+                  "[shm_zone] found old shm");
         opeers_shm = data;
 
         if ((opeers_shm->number == number)
@@ -2098,8 +1999,8 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     }
 
     if (!same) { 
-        ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
-                  "[ngx-healthcheck][stream][shm_zone] upstream data have changed.");
+        ngx_log_debug(LOG_LEVEL, shm_zone->shm.log, 0, MODULE_NAME
+                  "[shm_zone] upstream data have changed.");
 
         if (ngx_stream_upstream_check_shm_generation > 1) {
 
@@ -2115,10 +2016,9 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
                 //normally, to here.
                 opeers_shm = oshm_zone->data;
 
-                ngx_log_error(NGX_LOG_INFO, shm_zone->shm.log, 0,
-                               "stream upstream check, find oshm_zone:%p, "
-                                       "opeers_shm: %p",
-                               oshm_zone, opeers_shm);
+                ngx_log_debug(LOG_LEVEL, shm_zone->shm.log, 0, MODULE_NAME
+                              "find oshm_zone:%p, opeers_shm: %p",
+                              oshm_zone, opeers_shm);
             }
         }
 
@@ -2157,8 +2057,8 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
                                                                 peer[i].peer_addr, peer[i].upstream_name);
             if (opeer_shm) {
                 //find opeer, copy status data.
-                ngx_log_debug1(NGX_LOG_DEBUG_STREAM, shm_zone->shm.log, 0,
-                               "stream upstream check, inherit opeer: %V ",
+                ngx_log_debug1(LOG_LEVEL, shm_zone->shm.log, 0, MODULE_NAME
+                               "inherit opeer: %V ",
                                &peer[i].peer_addr->name);
 
                 rc = ngx_stream_upstream_check_init_shm_peer(peer_shm, opeer_shm,
@@ -2187,9 +2087,9 @@ ngx_stream_upstream_check_init_shm_zone(ngx_shm_zone_t *shm_zone, void *data)
     return NGX_OK;
 
     failure:
-    ngx_log_error(NGX_LOG_EMERG, shm_zone->shm.log, 0,
-                  "stream upstream check_shm_size is too small, "
-                          "you should specify a larger size.");
+    ngx_log_error(NGX_LOG_EMERG, shm_zone->shm.log, 0, MODULE_NAME
+                  "check_shm_size is too small, "
+                  "you should specify a larger size.");
     return NGX_ERROR;
 }
 
@@ -2326,8 +2226,8 @@ ngx_stream_upstream_check_init_process(ngx_cycle_t *cycle)
     ngx_stream_upstream_check_main_conf_t  *ucmcf;
     ucmcf = ngx_stream_cycle_get_module_main_conf(cycle, ngx_stream_upstream_check_module);
     if (ucmcf == NULL) {
-        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0,
-                     "[ngx-healthcheck][stream][init-process] no stream section, skip init,stream_peers_ctx:%p",stream_peers_ctx);
+        ngx_log_error(NGX_LOG_NOTICE, cycle->log, 0, MODULE_NAME
+                     "[init-process] no stream section, skip init,stream_peers_ctx:%p",stream_peers_ctx);
         stream_peers_ctx = NULL;
         return NGX_OK;
     }
