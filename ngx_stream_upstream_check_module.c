@@ -1566,7 +1566,7 @@ ngx_stream_upstream_check(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_conf_log_error(NGX_LOG_NOTICE /* current level always it */, cf, 0,
                        "[directive] found check arg:"
                        "[port:%d,interval:%d,timeout:%d,fall:%d,rise:%d,default_down:%d]", 
-                       port,interval,timeout,rise,default_down);
+                       port,interval,timeout,fall,rise,default_down);
     return NGX_CONF_OK;
 
     invalid_check_parameter:
