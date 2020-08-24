@@ -767,6 +767,7 @@ ngx_http_upstream_check_status_prometheus_format(ngx_buf_t *b,
     count = 0;
     for(j=0; j < 2; j++) {
         peers = upstream_peers[j];
+        if (peers == NULL) continue;
         peer = peers->peers.elts;
 
         for (i = 0; i < peers->peers.nelts; i++) {
@@ -821,6 +822,7 @@ ngx_http_upstream_check_status_prometheus_format(ngx_buf_t *b,
 
     for(j=0; j < 2; j++) {
         peers = upstream_peers[j];
+        if (peers == NULL) continue;
         peer = peers->peers.elts;
 
         for (i = 0; i < peers->peers.nelts; i++) {
@@ -861,6 +863,7 @@ ngx_http_upstream_check_status_prometheus_format(ngx_buf_t *b,
             "# TYPE nginx_upstream_server_fall counter\n");
     for(j=0; j < 2; j++) {
         peers = upstream_peers[j];
+        if (peers == NULL) continue;
         peer = peers->peers.elts;
 
         for (i = 0; i < peers->peers.nelts; i++) {
@@ -901,6 +904,7 @@ ngx_http_upstream_check_status_prometheus_format(ngx_buf_t *b,
             "# TYPE nginx_upstream_server_active gauge\n");
     for(j=0; j < 2; j++) {
         peers = upstream_peers[j];
+        if (peers == NULL) continue;
         peer = peers->peers.elts;
 
         for (i = 0; i < peers->peers.nelts; i++) {
