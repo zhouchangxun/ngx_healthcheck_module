@@ -104,7 +104,9 @@ http {
 
         check interval=3000 rise=2 fall=5 timeout=5000 type=http;
         check_http_send "GET / HTTP/1.0\r\n\r\n";
-        check_http_expect_alive http_2xx http_3xx;
+        check_http_expect_alive 200-400;
+        check_http_expect_header Host;
+        check_http_expect_header Connection ~ alive;
     }
 }
 
@@ -205,7 +207,19 @@ stream {
 }
 ```
 
-healthcheck
+check_http_expect_header
+-----------
+类似于nginxplus中的
+[match中header](http://nginx.org/en/docs/http/ngx_http_upstream_hc_module.html#match)
+
+
+check_http_expect_alive
+-----------
+类似于nginxplus中的
+[match中status](http://nginx.org/en/docs/http/ngx_http_upstream_hc_module.html#match)
+
+
+healthcheck_status
 -----------
 
 `语法`: healthcheck_status [html|csv|json]
