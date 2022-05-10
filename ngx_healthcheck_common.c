@@ -23,7 +23,7 @@ rc.err.len = NGX_MAX_CONF_ERRSTR;
 
 #if (NGX_HAVE_CASELESS_FILESYSTEM)
     rc.options = NGX_REGEX_CASELESS;
-#else   
+#else
     rc.options = caseless ? NGX_REGEX_CASELESS : 0;
 #endif
 
@@ -47,11 +47,58 @@ rc.err.len = NGX_MAX_CONF_ERRSTR;
 #endif
 }
 
+#define NGX_PCRE 1
+
+ngx_int_t
+ngx_upstream_check_http_header_regex(ngx_conf_t *cf, ngx_upstream_check_header_conf_t *uchcf,
+                                   ngx_str_t *regex, ngx_uint_t is_caseless)
+{
+#if (NGX_PCRE)
+    ngx_regex_compile_t  rc;
+    u_char               errstr[NGX_MAX_CONF_ERRSTR];
+
+    ngx_memzero(&rc, sizeof(ngx_regex_compile_t));
+
+    rc.pattern = *regex;
+
+rc.err.len = NGX_MAX_CONF_ERRSTR;
+    rc.err.data = errstr;
+    rc.pool = cf->pool;
+
+#if (NGX_HAVE_CASELESS_FILESYSTEM)
+    rc.options = NGX_REGEX_CASELESS;
+#else
+    rc.options = is_caseless ? 1 : 0;
+#endif
+
+    if (ngx_regex_compile(&rc) != NGX_OK) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "ngx_regex_compile: %V",
+                            &rc.err);
+        return NGX_ERROR;
+    }
+
+    uchcf->arg_regex = rc.regex;
+
+    return NGX_OK;
+
+#else
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                       "using regex \"%V\" requires PCRE library",
+                       regex);
+    return NGX_ERROR;
+
+#endif
+}
+
 ngx_int_t
 ngx_upstream_check_http_parse_status_line(
-    ngx_buf_t *b, ngx_uint_t *pstate, ngx_http_status_t *status)
+    ngx_buf_t *b, ngx_uint_t *pstate, ngx_http_status_t *status,ngx_list_t *header)
 {
     u_char ch, *p;
+    ngx_table_elt_t *elt;
+    size_t count;
     enum {
         sw_start = 0,
         sw_H,
@@ -65,10 +112,24 @@ ngx_upstream_check_http_parse_status_line(
         sw_status,
         sw_space_after_status,
         sw_status_text,
-        sw_lf,
-        sw_cr,
-        sw_almost_done,
-        receive_body
+
+        sw_header_cr,
+        sw_header_lf,
+        sw_header_end,
+        //special
+        receive_body,
+
+        sw_status_line_end,
+
+        sw_header_start_key,
+        sw_header_key,
+
+        sw_header_start_value,
+        sw_header_value,
+//        sw_lf,
+//        sw_cr,
+//        sw_almost_done,
+//        receive_body
     } state;
 
     state = *pstate;
@@ -196,8 +257,9 @@ ngx_upstream_check_http_parse_status_line(
                         state = sw_status_text;
                         break;
                     case CR:
-                        state = sw_almost_done;
+                        state = sw_status_line_end;
                         break;
+                    // why not return error
                     case LF:
                         goto done;
                     default:
@@ -209,47 +271,153 @@ ngx_upstream_check_http_parse_status_line(
             case sw_status_text:
                 switch (ch) {
                     case CR:
-                        state = sw_lf;
+                        state = sw_status_line_end;
                         break;
+                    // why not return error
                     case LF:
                         goto done;
                 }
                 break;
+
             /* LF */
-            case sw_lf:
+            case sw_status_line_end:
                 switch (ch) {
                 case LF:
-                    state = sw_cr;
+                    state = sw_header_start_key;
                     break;
                 default:
                     return NGX_ERROR;
                 }
                 break;
 
-            /* CR */
+            case sw_header_start_key:
+                switch (ch) {
+                    case CR: /* body but unsafe*/
+                        state = sw_header_end;
+                        break;
+
+                    default: /* response header */
+                        //add key
+                        count = 1;
+                        elt = ngx_list_push(header);
+
+                        elt->key.data = p;
+                        state = sw_header_key;
+                        break;
+                }
+                break;
+
+            case sw_header_key:
+                switch (ch) {
+                    case ':': /* second CR */
+                        elt->key.len = count;
+                        //ngx_log_error(NGX_LOG_ERR,ngx_cycle->log,0,"find key ->%V, len-> %z",&(elt->key),&(elt->key.len));
+                        count = 1;
+                        state = sw_header_start_value;
+                        break;
+                    default: /* response header */
+                        //add key
+                        count++;
+                        break;
+                }
+                break;
+
+            case sw_header_start_value:
+                switch (ch) {
+                    case ' ':
+                        break;
+                    case LF:
+                        return NGX_ERROR;
+                    case CR:
+                        return NGX_ERROR;
+                    // other
+                    default:
+                        count = 1;
+                        elt->value.data = p;
+                        state = sw_header_value;
+                        //add value
+                        break;
+                }
+                break;
+
+            case sw_header_value:
+                switch (ch) {
+                    case CR:
+                        elt->value.len = count;
+                        //ngx_log_error(NGX_LOG_ERR,ngx_cycle->log,0,"find value ->%V,len -> %z",&(elt->value),&(elt->value.len));
+                        count = 1;
+                        state = sw_header_cr;
+                        break;
+                    default:
+                        //add value
+                        count++;
+                        break;
+                }
+                break;
+
+            case sw_header_cr:
+                switch (ch) {
+                    case LF:
+                        state = sw_header_lf;
+                        break;
+                    default:
+                        return NGX_ERROR;
+                }
+                break;
+
+            case sw_header_lf:
+                switch (ch) {
+                    case CR:
+                        state = sw_header_end;
+                        break;
+                    default:
+                        //add key
+                        elt = ngx_list_push(header);
+                        count = 1;
+                        elt->key.data = p;
+                        state = sw_header_key;
+                        break;
+                }
+                break;
+
+                /* body */
+            case sw_header_end:
+                switch (ch) {
+                    case LF:
+                        /* all header_end */
+                        status->end = p - 1;
+                        goto done;
+                    default:
+                        return NGX_ERROR;
+                }
+            // how to use
+            case receive_body:
+                return NGX_OK;
+
+/*            *//* CR *//*
             case sw_cr:
                 switch (ch) {
-                case CR: /* second CR */
+                case CR: *//* second CR *//*
                     state = sw_almost_done;
                     break;
-                default: /* response header */
+                default: *//* response header *//*
                     state = sw_status_text;
                     break;
                 }
                 break;
 
-            /* LF */
+            *//* LF *//*
             case sw_almost_done:
                 switch (ch) {
                 case LF:
-                    /* all header_end */
+                    *//* all header_end *//*
                     status->end = p - 1;
                     goto done;
                 default:
                     return NGX_ERROR;
                 }
             case receive_body:
-                return NGX_OK;
+                return NGX_OK;*/
         }
     }
 

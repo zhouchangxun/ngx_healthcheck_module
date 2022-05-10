@@ -237,11 +237,15 @@ static ngx_int_t ngx_http_upstream_check_http_init(
 static ngx_int_t ngx_http_upstream_check_http_parse(
     ngx_upstream_check_peer_t *peer);
 ngx_int_t ngx_upstream_check_http_parse_status_line(
-    ngx_buf_t *b, ngx_uint_t *pstate, ngx_http_status_t *status);
+    ngx_buf_t *b, ngx_uint_t *pstate, ngx_http_status_t *status,ngx_list_t *headers);
 ngx_int_t ngx_upstream_check_http_body_regex(
     ngx_conf_t *cf,
     ngx_upstream_check_srv_conf_t  *ucscf,
     ngx_str_t *regex, ngx_uint_t caseless);
+ngx_int_t
+ngx_upstream_check_http_header_regex(ngx_conf_t *cf, ngx_upstream_check_header_conf_t *uchcf,
+                                     ngx_str_t *regex, ngx_uint_t is_caseless);
+
 static void ngx_http_upstream_check_http_reinit(
     ngx_upstream_check_peer_t *peer);
 
@@ -324,6 +328,8 @@ static char *ngx_http_upstream_check_http_expect_alive(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
 static char *ngx_upstream_check_http_body(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
+static char *ngx_upstream_check_http_header(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf);
 
 static char *ngx_http_upstream_check_fastcgi_params(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
@@ -371,13 +377,13 @@ static ngx_int_t ngx_http_upstream_check_init_shm_zone(
 static ngx_int_t ngx_http_upstream_check_init_process(ngx_cycle_t *cycle);
 
 
-static ngx_conf_bitmask_t  ngx_check_http_expect_alive_masks[] = {
+/*static ngx_conf_bitmask_t  ngx_check_http_expect_alive_masks[] = {
     { ngx_string("http_2xx"), NGX_CHECK_HTTP_2XX },
     { ngx_string("http_3xx"), NGX_CHECK_HTTP_3XX },
     { ngx_string("http_4xx"), NGX_CHECK_HTTP_4XX },
     { ngx_string("http_5xx"), NGX_CHECK_HTTP_5XX },
     { ngx_null_string, 0 }
-};
+};*/
 
 
 static ngx_command_t  ngx_http_upstream_check_commands[] = {
@@ -416,6 +422,13 @@ static ngx_command_t  ngx_http_upstream_check_commands[] = {
         0,
         0,
         NULL },
+
+    { ngx_string("check_http_expect_header"),
+      NGX_HTTP_UPS_CONF|NGX_CONF_1MORE,
+      ngx_upstream_check_http_header,
+      0,
+      0,
+      NULL },
 
     { ngx_string("check_fastcgi_param"),
       NGX_HTTP_UPS_CONF|NGX_CONF_TAKE2,
@@ -554,7 +567,7 @@ static ngx_check_conf_t  ngx_check_types[] = {
     { NGX_HTTP_CHECK_HTTP,
       ngx_string("http"),
       ngx_string("GET / HTTP/1.0\r\n\r\n"),
-      NGX_CONF_BITMASK_SET | NGX_CHECK_HTTP_2XX | NGX_CHECK_HTTP_3XX,
+      0,
       ngx_http_upstream_check_send_handler,
       ngx_http_upstream_check_recv_handler,
       ngx_http_upstream_check_http_init,
@@ -1417,6 +1430,29 @@ ngx_http_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
     ngx_http_upstream_check_ctx_t       *ctx;
     ngx_upstream_check_srv_conf_t  *ucscf;
 
+    ngx_list_t *headers;
+
+    ngx_list_part_t *part;
+    ngx_table_elt_t *elt;
+    ngx_int_t count_include = 0;
+    ngx_uint_t i;
+    ngx_uint_t condition_i;
+
+    ngx_array_t *codes_condition;
+    ngx_upstream_check_code_conf_t *code_condition;
+
+    ngx_uint_t codes_i;
+    ngx_uint_t code_i;
+    ngx_uint_t flag;
+    ngx_upstream_check_header_conf_t *condition;
+
+
+    headers = ngx_list_create(peer->pool,1,sizeof(ngx_table_elt_t));
+    if(headers == NULL){
+        return NGX_ERROR;
+    }
+
+
     ucscf = peer->conf;
     ctx = peer->check_data;
 
@@ -1424,7 +1460,9 @@ ngx_http_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
 
         rc = ngx_upstream_check_http_parse_status_line(&ctx->recv,
                                                        &ctx->state,
-                                                       &ctx->status);
+                                                       &ctx->status,
+                                                       headers);
+
         if (rc == NGX_AGAIN) {
             return rc;
         }
@@ -1438,21 +1476,155 @@ ngx_http_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
 
         code = ctx->status.code;
 
-        if (code >= 200 && code < 300) {
-            code_n = NGX_CHECK_HTTP_2XX;
-        } else if (code >= 300 && code < 400) {
-            code_n = NGX_CHECK_HTTP_3XX;
-        } else if (code >= 400 && code < 500) {
-            peer->pc.connection->error = 1;
-            code_n = NGX_CHECK_HTTP_4XX;
-        } else if (code >= 500 && code < 600) {
-            peer->pc.connection->error = 1;
-            code_n = NGX_CHECK_HTTP_5XX;
-        } else {
-            peer->pc.connection->error = 1;
-            code_n = NGX_CHECK_HTTP_ERR;
+        codes_condition = ucscf->codes->elts;
+
+        for(codes_i = 0; codes_i < ucscf->codes->nelts;codes_i++){
+
+            code_condition = codes_condition[codes_i].elts;
+
+            flag = 0;
+
+            for(code_i = 0; code_i < codes_condition[codes_i].nelts;code_i++){
+
+                if(code_condition[code_i].is_not == 1){
+                    if( code >= code_condition[code_i].begin && code <= code_condition[code_i].end ){
+                        flag = 1;
+                        break;
+                    }
+                }else{
+                    if( code >= code_condition[code_i].begin && code <= code_condition[code_i].end ){
+                        flag = 1;
+                        break;
+                    }
+                }
+                //break
+            }
+            if(code_condition[0].is_not == 1){
+                if(flag == 1){
+                    return NGX_ERROR;
+                }
+            }else{
+                if(flag == 0){
+                    return NGX_ERROR;
+                }
+            }
         }
 
+        if (code >= 400 && code < 500) {
+            peer->pc.connection->error = 1;
+        } else if (code >= 500 && code < 600) {
+            peer->pc.connection->error = 1;
+        } else {
+            peer->pc.connection->error = 1;
+        }
+
+        part = &headers->part;
+        elt = part->elts;
+
+        for(i = 0 ;; i++){
+            if(i >= part->nelts){
+                if(part->next == NULL){
+                    break;
+                }
+                part = part->next;
+                elt = part->elts;
+                i = 0;
+            }
+            /* header filter*/
+            //            ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+            //                          "[http-response-parse]: code not matched");
+            //            return NGX_ERROR;
+
+/*            ngx_log_error(NGX_LOG_ERR,ngx_cycle->log,0,"header: %V -> %V",
+                          &(elt->key),&(elt->value));*/
+
+            condition = ucscf->headers->elts;
+
+//            ngx_log_error(NGX_LOG_ERR,ngx_cycle->log,0,"filter len: %i",
+//                          ucscf->headers->nelts);
+
+            for(condition_i = 0; condition_i < ucscf->headers->nelts;condition_i++){
+//                ngx_log_error(NGX_LOG_ERR,ngx_cycle->log,0,"filter header: %V",
+//                              &(condition[condition_i].name));
+
+                if(condition[condition_i].is_contain_name == 1){ /* include */
+
+                    if(ngx_strncmp(condition[condition_i].name.data,elt->key.data,condition[condition_i].name.len) == 0){
+
+                        count_include++;
+                        //break;
+                    }
+                }else if(condition[condition_i].is_contain_name == 0){ /* ! */
+
+                    if(ngx_strncmp(condition[condition_i].name.data,elt->key.data,condition[condition_i].name.len) == 0){
+                        ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                                                                    "matches a header that is not allowed");
+                        return NGX_ERROR;
+                    }
+                }else if(ngx_strncmp(condition[condition_i].name.data,elt->key.data,condition[condition_i].name.len) == 0){
+
+                    if(condition[condition_i].is_full_match == 1){ /* = */
+                        if(condition[condition_i].is_not == 1 && condition[condition_i].is_careless == 0){
+                            if(ngx_strncmp(condition[condition_i].arg.data,elt->value.data,condition[condition_i].arg.len) == 0){
+                                ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                                                                            "matches a header arg that is not allowed");
+                                return NGX_ERROR;
+                            }
+                        }else if(condition[condition_i].is_not == 1 && condition[condition_i].is_careless == 1){
+                            if(ngx_strncasecmp(condition[condition_i].arg.data,elt->value.data,condition[condition_i].arg.len) == 0){
+                                ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                                                                            "matches a header arg that is not allowed");
+                                return NGX_ERROR;
+                            }
+                        }else if(condition[condition_i].is_not == 0 && condition[condition_i].is_careless == 0){
+                            if(ngx_strncmp(condition[condition_i].arg.data,elt->value.data,condition[condition_i].arg.len) == 0){
+
+                                count_include++;
+                            }
+                        }else{
+                            if(ngx_strncasecmp(condition[condition_i].arg.data,elt->value.data,condition[condition_i].arg.len) == 0){
+
+                                count_include++;
+                            }
+                        }
+                    }
+                    else{/* ~ */
+                        if(condition[condition_i].is_not == 1){/* ! */
+                            /* regex */
+                            if (ngx_regex_exec(condition[condition_i].arg_regex, &elt->value, NULL, 0) != NGX_REGEX_NO_MATCHED) {
+                                ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                                                                            "matches a header arg that is not allowed");
+                                return NGX_ERROR;
+                            }
+                        } else{
+                            if (ngx_regex_exec(condition[condition_i].arg_regex, &elt->value, NULL, 0) != NGX_REGEX_NO_MATCHED) {
+
+                                count_include++;
+                                //break;
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+
+        condition = ucscf->headers->elts;
+        for(condition_i = 0; condition_i < ucscf->headers->nelts;condition_i++){
+            if(condition[condition_i].is_contain_name == 1){
+                count_include--;
+            }else if(condition[condition_i].is_not == 0){
+                count_include--;
+            }
+        }
+
+        if(count_include < 0){
+            ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
+                                                        "could not match all header conditions.");
+            return NGX_ERROR;
+        }
+
+        // TODO optimization
         // find content length from [Content-Length: (\d+)\r]
         *ctx->status.end = '\0';
         u_char * content_len_start = (u_char *)ngx_strstr(ctx->status.start, "Content-Length:");
@@ -1475,16 +1647,13 @@ ngx_http_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
 
         ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
                 "[http-response-parse]: "
-                "code: %ui, expect code mask: %ui. "
+                "code: %ui. "
                 "received body len: %ui, content:[%V]",
-                code, ucscf->code.status_alive,
+                code,
                 response_body.len, &response_body);
 
-        if (!(code_n & ucscf->code.status_alive)) {
-            ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
-                          "[http-response-parse]: code not matched");
-            return NGX_ERROR;
-        } else if (ucscf->expect_body_regex != NGX_CONF_UNSET_PTR) {
+
+        if (ucscf->expect_body_regex != NGX_CONF_UNSET_PTR) {
             if (found_body_len == 1 && response_body.len < body_len) {
                 return NGX_AGAIN;
             }
@@ -1505,10 +1674,6 @@ ngx_http_upstream_check_http_parse(ngx_upstream_check_peer_t *peer)
                               "[http-response-parse]: body matched");
                 return NGX_OK;
             }
-        } else {
-            ngx_log_debug(LOG_LEVEL, ngx_cycle->log, 0, MODULE_NAME
-                          "[http-response-parse]: code matched");
-            return NGX_OK;
         }
     } else {
         return NGX_AGAIN;
@@ -1625,9 +1790,16 @@ ngx_http_upstream_check_fastcgi_parse(ngx_upstream_check_peer_t *peer)
 {
     ngx_int_t                            rc;
     ngx_flag_t                           done;
-    ngx_uint_t                           type, code, code_n;
+    ngx_uint_t                           type, code;
     ngx_http_upstream_check_ctx_t       *ctx;
     ngx_upstream_check_srv_conf_t  *ucscf;
+
+    ngx_array_t *codes_condition;
+    ngx_upstream_check_code_conf_t *code_condition;
+
+    ngx_uint_t codes_i;
+    ngx_uint_t code_i;
+    ngx_uint_t flag;
 
     ucscf = peer->conf;
     ctx = peer->check_data;
@@ -1753,27 +1925,47 @@ ngx_http_upstream_check_fastcgi_parse(ngx_upstream_check_peer_t *peer)
 
         code = ctx->status.code;
 
-        if (code >= 200 && code < 300) {
-            code_n = NGX_CHECK_HTTP_2XX;
-        } else if (code >= 300 && code < 400) {
-            code_n = NGX_CHECK_HTTP_3XX;
-        } else if (code >= 400 && code < 500) {
-            code_n = NGX_CHECK_HTTP_4XX;
-        } else if (code >= 500 && code < 600) {
-            code_n = NGX_CHECK_HTTP_5XX;
-        } else {
-            code_n = NGX_CHECK_HTTP_ERR;
+
+        codes_condition = ucscf->codes->elts;
+
+        for(codes_i = 0; codes_i < ucscf->codes->nelts;codes_i++){
+
+            code_condition = codes_condition[codes_i].elts;
+
+            flag = 0;
+
+            for(code_i = 0; code_i < codes_condition[codes_i].nelts;code_i++){
+
+                if(code_condition[code_i].is_not == 1){
+                    if( code >= code_condition[code_i].begin && code <= code_condition[code_i].end ){
+                        flag = 1;
+                        break;
+                    }
+                }else{
+                    if( code >= code_condition[code_i].begin && code <= code_condition[code_i].end ){
+                        flag = 1;
+                        break;
+                    }
+                }
+                //break
+            }
+            if(code_condition[0].is_not == 1){
+                if(flag == 1){
+                    return NGX_ERROR;
+                }
+            }else{
+                if(flag == 0){
+                    return NGX_ERROR;
+                }
+            }
         }
 
-        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0, MODULE_NAME
-                       "fastcgi http_parse: code_n: %ui, conf: %ui",
-                       code_n, ucscf->code.status_alive);
 
-        if (code_n & ucscf->code.status_alive) {
-            return NGX_OK;
-        } else {
-            return NGX_ERROR;
-        }
+//        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0, MODULE_NAME
+//                       "fastcgi http_parse: code_n: %ui, conf: %ui",
+//                       code_n, ucscf->code.status_alive);
+
+        return NGX_OK;
 
     }
 
@@ -3031,7 +3223,7 @@ ngx_http_upstream_check_fastcgi_params(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
-static char *
+/*static char *
 ngx_http_upstream_check_http_expect_alive(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
 {
@@ -3076,6 +3268,169 @@ ngx_http_upstream_check_http_expect_alive(ngx_conf_t *cf, ngx_command_t *cmd,
     }
 
     ucscf->code.status_alive = bit;
+
+    return NGX_CONF_OK;
+}*/
+
+static char *
+ngx_http_upstream_check_http_expect_alive(ngx_conf_t *cf, ngx_command_t *cmd,
+                                          void *conf)
+{
+    ngx_str_t                           *value;
+
+    ngx_upstream_check_srv_conf_t  *ucscf;
+
+
+    ucscf = ngx_http_conf_get_module_srv_conf(cf,ngx_http_upstream_check_module);
+
+
+    value = cf->args->elts;
+
+    if(cf->args->nelts == 2 && value[1].data[0] == '!'){
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_uint_t is_not = 0;
+    ngx_uint_t i = 1;
+    if(cf->args->nelts > 2 && value[1].data[0] == '!'){
+        is_not = 1;
+        i = 2;
+    }
+
+    ngx_array_t *code_list;
+
+    u_char *find_it;
+
+    ngx_upstream_check_code_conf_t *code;
+
+    code_list = ngx_array_push(ucscf->codes);
+
+    if(code_list == NULL){
+        return NGX_CONF_ERROR;
+    }
+
+    ngx_array_init(code_list,cf->pool,1, sizeof(ngx_upstream_check_code_conf_t));
+
+    for(;i<cf->args->nelts;i++){
+        //value[i]
+        code = ngx_array_push(code_list);
+        if(code == NULL){
+            return NGX_CONF_ERROR;
+        }
+        code->is_not = is_not;
+
+        find_it = (u_char*)ngx_strchr(value[i].data,'-');
+        if(find_it == NULL){
+           code->begin = ngx_atoi(value[i].data,value[i].len);
+           code->end = code->begin;
+        }else{
+            code->begin = ngx_atoi(value[i].data,(u_char*)find_it - value[i].data);
+            code->end = ngx_atoi(find_it + 1,value[i].len - ((u_char*)find_it - value[i].data) - 1);
+        }
+        if(code->end == 0){
+            return NGX_CONF_ERROR;
+        }
+
+
+    }
+
+
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_upstream_check_http_header(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf){
+
+    ngx_str_t *value,*name;
+    ngx_upstream_check_srv_conf_t  *ucscf;
+    ngx_upstream_check_header_conf_t *header;
+
+    size_t len;
+    u_char *mod;
+
+    //ngx_uint_t is_careless = 0;
+
+    value = cf->args->elts;
+
+    ucscf = ngx_http_conf_get_module_srv_conf(cf,ngx_http_upstream_check_module);
+/*
+    if(ucscf->headers == NULL){
+        ucscf->headers = ngx_array_create(cf->pool,4,
+                                          sizeof(ngx_upstream_check_header_t));
+        if(ucscf->headers == NULL){
+            return NGX_CONF_ERROR;
+        }
+    }
+*/
+
+    header = ngx_array_push(ucscf->headers);
+    if(header == NULL){
+        return NGX_CONF_ERROR;
+    }
+
+    header->is_contain_name = NGX_CONF_UNSET_UINT;
+    header->is_full_match = NGX_CONF_UNSET_UINT;
+    header->is_not = 0;
+    header->is_careless = 0;
+    if(cf->args->nelts > 4 || cf->args->nelts == 1){
+        ngx_conf_log_error(NGX_LOG_EMERG,cf,0,
+                                  "more than 1, less than 4 args required.");
+        return NGX_CONF_ERROR;
+    }
+
+
+    if(cf->args->nelts == 2){
+        // contain header
+        header->is_contain_name = 1;
+        header->name = value[1];
+    }else if(cf->args->nelts == 3){
+        len = value[1].len;
+        mod = value[1].data;
+
+        if(len == 1 && mod[0] == '!'){
+            header->is_contain_name = 0;
+            header->name = value[2];
+        }else{
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "invalid mode args \"%V\", must be ~ or ~* ", &value[1]);
+            return NGX_CONF_ERROR;
+        }
+    }else if(cf->args->nelts == 4){
+        len = value[2].len;
+        mod = value[2].data;
+
+        header->name = value[1];
+        name = &value[3];
+        size_t i;
+        for(i = 0;i < len;i++){
+            if(mod[i] == '~'){
+                header->is_full_match = 0;
+            }
+            else if(mod[i] == '!'){
+                header->is_not = 1;
+            }
+            else if(mod[i] == '='){
+                header->is_full_match = 1;
+            }
+            else if(mod[i] == '*'){
+                header->is_careless = 1;
+            }
+        }
+
+        if(header->is_full_match == 1){
+            header->arg = value[3];
+        }else if(header->is_full_match == 0){
+            if (ngx_upstream_check_http_header_regex(cf, header, name, header->is_careless) != NGX_OK) {
+                return NGX_CONF_ERROR;
+            }
+        }
+        else{
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "invalid mode args \"%V\", must be ~ or ~* ", &value[1]);
+            return NGX_CONF_ERROR;
+        }
+    }
 
     return NGX_CONF_OK;
 }
@@ -3382,6 +3737,18 @@ ngx_http_upstream_check_create_srv_conf(ngx_conf_t *cf)
     ucscf->fastcgi_params = ngx_array_create(cf->pool, 2 * 4, sizeof(ngx_str_t));
     if (ucscf->fastcgi_params == NULL) {
         return NULL;
+    }
+
+    ucscf->headers = ngx_array_create(cf->pool,4,
+                                      sizeof(ngx_upstream_check_header_conf_t));
+    if(ucscf->headers == NULL){
+        return NGX_CONF_ERROR;
+    }
+
+    ucscf->codes = ngx_array_create(cf->pool,1,
+                                      sizeof(ngx_array_t));
+    if(ucscf->codes == NULL){
+        return NGX_CONF_ERROR;
     }
 
     ucscf->port = NGX_CONF_UNSET_UINT;
